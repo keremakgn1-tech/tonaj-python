@@ -15,15 +15,22 @@ jobs:
       - name: Depoyu al
         uses: actions/checkout@v4
 
-      - name: Buildozer ile APK derle
-        uses: ArtemSBulgakov/buildozer-action@v1
-        id: buildozer
-        with:
-          buildozer_version: stable
+      - name: Buildozer'in resmi Docker imajiyla APK derle
+        run: |
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/user/hostcwd" \
+            ghcr.io/kivy/buildozer:latest android debug
+
+      - name: Uretilen APK dosyasinin yolunu bul
+        id: findapk
+        run: |
+          APK_PATH=$(find bin -name "*.apk" | head -n1)
+          echo "APK bulundu: $APK_PATH"
+          echo "path=$APK_PATH" >> "$GITHUB_OUTPUT"
 
       - name: APK'yi yukle (Artifacts)
         uses: actions/upload-artifact@v4
         with:
           name: tonaj-apk
-          path: ${{ steps.buildozer.outputs.filename }}
+          path: ${{ steps.findapk.outputs.path }}
           retention-days: 90
