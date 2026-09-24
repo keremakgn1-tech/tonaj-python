@@ -3,7 +3,7 @@ title = Tonaj
 package.name = tonaj
 package.domain = com.github.keremakgn1tech
 source.dir = .
-source.include_exts = py,png,jpg,kv,atlas,json
+source.include_exts = py,png,jpg,kv,atlas,json,ttf
 version = 1.0
 
 requirements = python3,charset_normalizer==3.3.2,kivy==2.3.1
