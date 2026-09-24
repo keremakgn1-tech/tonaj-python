@@ -1,0 +1,29 @@
+name: Python APK Uret
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Depoyu al
+        uses: actions/checkout@v4
+
+      - name: Buildozer ile APK derle
+        uses: ArtemSBulgakov/buildozer-action@v1
+        id: buildozer
+        with:
+          buildozer_version: stable
+
+      - name: APK'yi yukle (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tonaj-apk
+          path: ${{ steps.buildozer.outputs.filename }}
+          retention-days: 90
