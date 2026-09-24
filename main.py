@@ -3,6 +3,17 @@ TONAJ - Antrenman Takibi (Kivy / Android)
 main.py, arayuzu (View) core.py'deki (Model/Logic) fonksiyonlara baglar.
 """
 import os
+from kivy.core.text import LabelBase
+_FONT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Kivy'nin varsayilan widget fontu 'Roboto' adiyla anilir; bunu Turkce
+# karakterlerin (ğ ş ı İ ö ü ç) TAMAMINI destekleyen DejaVu Sans ile
+# degistiriyoruz. Bu tek satir, uygulamadaki TUM Label/Button/TextInput
+# widget'larini otomatik olarak etkiler (her birini tek tek degistirmeye
+# gerek yok), cunku hepsi varsayilan olarak 'Roboto' adini kullanir.
+LabelBase.register(name="Roboto",
+                    fn_regular=os.path.join(_FONT_DIR, "DejaVuSans.ttf"),
+                    fn_bold=os.path.join(_FONT_DIR, "DejaVuSans-Bold.ttf"))
+
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
@@ -170,12 +181,19 @@ class ProgramScreen(Screen):
         if is_next:
             with card.canvas.before:
                 Color(*ACCENT)
-        head = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
+        title_row = BoxLayout(size_hint_y=None, height=dp(24))
         title = day["name"] + ("  · SIRADA" if is_next else "")
-        head.add_widget(label(title, size=16, bold=True))
+        title_lbl = Label(text=title, font_size=sp_(16), bold=True, color=TEXT,
+                           halign="left", valign="middle", shorten=True, shorten_from="right",
+                           size_hint_y=None, height=dp(24))
+        title_lbl.bind(size=lambda *_: setattr(title_lbl, "text_size", title_lbl.size))
+        title_row.add_widget(title_lbl)
+        card.add_widget(title_row)
+
+        head = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
         up = Button(text="↑", size_hint=(None, None), size=(dp(34), dp(34)), background_color=RAISED)
         down = Button(text="↓", size_hint=(None, None), size=(dp(34), dp(34)), background_color=RAISED)
-        dup = Button(text="⧉", size_hint=(None, None), size=(dp(34), dp(34)), background_color=RAISED)
+        dup = Button(text="Kopya", size_hint=(None, None), size=(dp(56), dp(34)), background_color=RAISED, font_size=sp_(11))
         delete = Button(text="✕", size_hint=(None, None), size=(dp(34), dp(34)), background_color=RAISED, color=DANGER)
         up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render()))
         down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render()))
@@ -201,7 +219,7 @@ class ProgramScreen(Screen):
         actions = BoxLayout(size_hint_y=None, height=dp(42), spacing=dp(6), padding=(0, dp(6), 0, 0))
         add_ex = styled_button("+ Hareket", color=RAISED, text_color=TEXT)
         add_ex.bind(on_release=lambda *_: self.open_exercise_picker(day["id"]))
-        deload = styled_button("🪫 Deload", color=RAISED, text_color=TEXT)
+        deload = styled_button("Deload", color=RAISED, text_color=TEXT)
         deload.bind(on_release=lambda *_: self.start_session(day["id"], is_deload=True))
         start = styled_button("Bu Günle Başla")
         start.bind(on_release=lambda *_: self.start_session(day["id"]))
@@ -326,7 +344,7 @@ class ProgramScreen(Screen):
         header.add_widget(label(f"Toplam Tonaj: {tonnage:g} kg", size=13, color=MUTED))
         col.add_widget(header)
 
-        note_btn = styled_button(("📝 " + sess["note"][:40]) if sess["note"] else "📝 Antrenman notu ekle",
+        note_btn = styled_button(("Not: " + sess["note"][:40]) if sess["note"] else "+ Antrenman notu ekle",
                                   color=RAISED, text_color=TEXT)
         note_btn.bind(on_release=lambda *_: self.open_note_editor())
         col.add_widget(note_btn)
@@ -398,14 +416,14 @@ class ProgramScreen(Screen):
 
         tgt = target_label(ex)
         if tgt:
-            card.add_widget(label("🎯 " + tgt, size=12, color=ACCENT, height=dp(22)))
+            card.add_widget(label("Hedef: " + tgt, size=12, color=ACCENT, height=dp(22)))
         if ex.get("suggestedWeight") is not None:
-            txt = f"💡 Önerilen: {ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
+            txt = f"Öneri: {ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
             card.add_widget(label(txt, size=11, color=STEEL, height=dp(30)))
 
         for si, s in enumerate(ex["sets"]):
             row = BoxLayout(size_hint_y=None, height=dp(26))
-            flag = "🔥" if s.get("isWarmup") else str(si + 1)
+            flag = "ISI" if s.get("isWarmup") else str(si + 1)
             rir_txt = f" RIR{s['rir']}" if s.get("rir") is not None else ""
             row.add_widget(label(f"{flag}  {s['weight']:g}kg × {s['reps']}{rir_txt}", size=12,
                                   color=FAINT if s.get("isWarmup") else TEXT))
@@ -424,7 +442,7 @@ class ProgramScreen(Screen):
 
         extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
         rir_input = TextInput(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
-        warm_toggle = ToggleButton(text="🔥 Isınma", size_hint_x=0.5, background_color=RAISED, color=TEXT)
+        warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_color=RAISED, color=TEXT)
         extra.add_widget(rir_input)
         extra.add_widget(warm_toggle)
         card.add_widget(extra)
@@ -567,7 +585,7 @@ class ReportScreen(Screen):
         stats = Card(size_hint_y=None, height=dp(80), orientation="horizontal")
         stats.add_widget(label(f"{tonnage:g}\nkg", size=18, bold=True, color=ACCENT, halign="center"))
         stats.add_widget(label(f"{count}\nantrenman", size=18, bold=True, halign="center"))
-        stats.add_widget(label(f"🏆{len(prs)}\nrekor", size=18, bold=True, halign="center"))
+        stats.add_widget(label(f"{len(prs)}\nrekor", size=18, bold=True, halign="center"))
         col.add_widget(stats)
 
         vol = core.muscle_group_volume(state, "week", cur_key)
@@ -595,7 +613,7 @@ class SettingsScreen(Screen):
         self.clear_widgets()
         col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(12))
         col.add_widget(label("Verilerin bu cihazda kalıcı olarak saklanıyor.", color=MUTED, height=dp(40)))
-        export_btn = styled_button("📥 Yedeği Dışa Aktar")
+        export_btn = styled_button("Yedeği Dışa Aktar")
         export_btn.bind(on_release=lambda *_: self.export_backup())
         col.add_widget(export_btn)
         self.add_widget(col)
