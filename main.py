@@ -29,6 +29,7 @@ from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.spinner import Spinner
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.properties import ObjectProperty
@@ -61,15 +62,15 @@ def get_data_path():
     return os.path.join(base, "tonaj_state.json")
 
 
-def bg_rect(widget, color):
+def bg_rect(widget, color, radius=None):
     with widget.canvas.before:
-        Color(*color)
-        rect = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[dp(10)])
+        col = Color(*color)
+        rect = RoundedRectangle(pos=widget.pos, size=widget.size, radius=[dp(10) if radius is None else radius])
     def upd(*_):
         rect.pos = widget.pos
         rect.size = widget.size
     widget.bind(pos=upd, size=upd)
-    return rect
+    return col
 
 
 class Card(BoxLayout):
@@ -106,7 +107,7 @@ def dark_ti(**kw):
     """Kivy'nin varsayilan (acik renkli) TextInput'unu koyu temaya uydurur."""
     kw.setdefault("background_color", RAISED)
     kw.setdefault("foreground_color", TEXT)
-    kw.setdefault("hint_text_color", FAINT)
+    kw.setdefault("hint_text_color", MUTED)
     kw.setdefault("cursor_color", ACCENT)
     kw.setdefault("padding", [dp(10), dp(10), dp(10), dp(10)])
     if "size_hint_y" not in kw and "height" not in kw:
@@ -259,7 +260,7 @@ class ProgramScreen(Screen):
         up = Button(text="↑", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
         down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
         dup = Button(text="Kopya", size_hint=(None, None), size=(dp(48), dp(26)), background_color=(0,0,0,0), color=FAINT, font_size=sp_(10))
-        delete = Button(text="✕", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
+        delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
         up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render()))
         down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render()))
         dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render()))
@@ -288,7 +289,7 @@ class ProgramScreen(Screen):
             tgt = target_label(ex) or "hedef yok"
             tgt_lbl = mono_label(tgt, size=11, color=MUTED)
             row.add_widget(tgt_lbl)
-            rm = Button(text="✕", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=FAINT)
+            rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
             rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render()))
             row.add_widget(rm)
             card.add_widget(row)
@@ -498,7 +499,7 @@ class ProgramScreen(Screen):
         prev_max = core.max_weight_for(state, ex["name"])
         head = BoxLayout(size_hint_y=None, height=dp(26))
         head.add_widget(label(ex["name"], size=16, bold=True))
-        rm_ex = Button(text="✕", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=FAINT)
+        rm_ex = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
         rm_ex.bind(on_release=lambda *_: (sess["exercises"].pop(idx), app.save(), self.render()))
         head.add_widget(rm_ex)
         card.add_widget(head)
@@ -528,7 +529,7 @@ class ProgramScreen(Screen):
             if badge:
                 badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
                 row.add_widget(mono_label(badge["text"], size=10, color=badge_color, halign="right"))
-            rm = Button(text="✕", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=FAINT)
+            rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
             rm.bind(on_release=lambda *_, i=idx, j=si: (core.remove_set(state, i, j), app.save(), self.render()))
             row.add_widget(rm)
             card.add_widget(row)
@@ -765,18 +766,49 @@ class RootWidget(BoxLayout):
         self.sm.add_widget(SettingsScreen(name="settings"))
         self.add_widget(self.sm)
 
-        nav = BoxLayout(size_hint_y=None, height=dp(56))
-        bg_rect(nav, CARD)
-        for name, icon in [("program", "Program"), ("history", "Geçmiş"),
-                            ("library", "Hareketler"), ("report", "Rapor"), ("settings", "Ayarlar")]:
-            b = Button(text=icon, background_normal="", background_color=CARD, color=MUTED, font_size=sp_(11))
-            b.bind(on_release=lambda *_, n=name: setattr(self.sm, "current", n))
-            nav.add_widget(b)
+        nav = self.build_nav_bar()
         self.add_widget(nav)
 
         self.toast_label = Label(text="", size_hint=(None, None), opacity=0,
                                   color=(0.07, 0.08, 0.06, 1), bold=True)
         bg_rect(self.toast_label, ACCENT)
+
+    NAV_ITEMS = [("program", "PROGRAM"), ("history", "GEÇMİŞ"), ("library", "HAREKETLER"),
+                 ("report", "RAPOR"), ("settings", "AYARLAR")]
+
+    def build_nav_bar(self):
+        nav_wrap = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(58))
+        top_border = Widget(size_hint_y=None, height=dp(1))
+        bg_rect(top_border, BORDER, radius=0)
+        nav_wrap.add_widget(top_border)
+
+        nav = BoxLayout(size_hint_y=None, height=dp(57))
+        bg_rect(nav, CARD, radius=0)
+        self._nav_tabs = {}
+        for i, (name, text) in enumerate(self.NAV_ITEMS):
+            if i > 0:
+                div = Widget(size_hint_x=None, width=dp(1))
+                bg_rect(div, BORDER, radius=0)
+                nav.add_widget(div)
+            cell = ClickableRow(orientation="vertical", padding=(0, 0, 0, dp(7)))
+            indicator = Widget(size_hint_y=None, height=dp(2))
+            ind_col = bg_rect(indicator, BG, radius=0)
+            lbl = Label(text=text, font_name="Oswald", font_size=sp_(10), bold=True, color=MUTED)
+            cell.add_widget(indicator)
+            cell.add_widget(lbl)
+            cell.bind(on_release=lambda *_, n=name: setattr(self.sm, "current", n))
+            nav.add_widget(cell)
+            self._nav_tabs[name] = (ind_col, lbl)
+        nav_wrap.add_widget(nav)
+        self.sm.bind(current=self._refresh_nav)
+        self._refresh_nav()
+        return nav_wrap
+
+    def _refresh_nav(self, *_):
+        for name, (ind_col, lbl) in self._nav_tabs.items():
+            active = (self.sm.current == name)
+            ind_col.rgba = ACCENT if active else BG
+            lbl.color = ACCENT if active else MUTED
 
     def show_toast(self, msg):
         self.toast_label.text = msg
@@ -788,6 +820,9 @@ class TonajApp(App):
     def build(self):
         self.title = "Tonaj"
         Window.clearcolor = BG
+        # Klavye acildiginda pencere yeniden boyutlanip odakli TextInput'u
+        # klavyenin USTUNDE tutar (varsayilanda klavye input'un uzerine biner).
+        Window.softinput_mode = "below_target"
         self.state, _ = core.load_state(get_data_path())
         self.root_widget = RootWidget()
         return self.root_widget
