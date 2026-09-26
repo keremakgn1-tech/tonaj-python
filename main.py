@@ -27,6 +27,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.spinner import Spinner
+from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.widget import Widget
@@ -44,6 +45,7 @@ CARD = (0x1B/255, 0x1D/255, 0x21/255, 1)
 CARD2 = (0x23/255, 0x25/255, 0x29/255, 1)
 RAISED = (0x2A/255, 0x2D/255, 0x32/255, 1)
 BORDER = (0x2E/255, 0x31/255, 0x38/255, 1)
+DIVIDER = (0x3E/255, 0x42/255, 0x4A/255, 1)  # satir ayirici - BORDER'dan biraz daha secilebilir
 TEXT = (0xF5/255, 0xF5/255, 0xF0/255, 1)
 MUTED = (0xC2/255, 0xC4/255, 0xC9/255, 1)
 FAINT = (0x9E/255, 0xA0/255, 0xA6/255, 1)
@@ -113,7 +115,24 @@ def dark_ti(**kw):
     if "size_hint_y" not in kw and "height" not in kw:
         kw["size_hint_y"] = None
         kw["height"] = dp(40)
-    return TextInput(**kw)
+    ti = TextInput(**kw)
+
+    def on_focus(instance, has_focus):
+        if not has_focus:
+            return
+        # Klavye acilirken pencere yeniden boyutlanir (android:windowSoftInputMode
+        # adjustResize) ama ScrollView icerigi otomatik kaymaz; odaklanan kutuyu
+        # gorunur alana kaydiriyoruz. Klavye animasyonunun oturmasi icin kisa gecikme.
+        def scroll_into_view(*_):
+            parent = instance.parent
+            while parent is not None and not isinstance(parent, ScrollView):
+                parent = parent.parent
+            if parent is not None:
+                parent.scroll_to(instance, padding=dp(24), animate=True)
+        Clock.schedule_once(scroll_into_view, 0.35)
+
+    ti.bind(focus=on_focus)
+    return ti
 
 
 def mono_label(text, size=14, color=MUTED, halign="left", **kw):
@@ -242,7 +261,7 @@ class ProgramScreen(Screen):
             col.add_widget(self.day_card(state, day, is_next=(day["id"] == next_id)))
 
         add_btn = styled_button("+ GÜN EKLE", color=RAISED, text_color=TEXT)
-        add_btn.bind(on_release=lambda *_: (core.add_program_day(state), app.save(), self.render()))
+        add_btn.bind(on_release=lambda *_: (core.add_program_day(state), app.save(), self.render(keep_scroll=True)))
         col.add_widget(add_btn)
 
         free_btn = styled_button("Serbest Antrenman Başlat", color=RAISED, text_color=TEXT)
@@ -281,9 +300,9 @@ class ProgramScreen(Screen):
         down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
         dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), dp(28)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(13))
         delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
-        up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render()))
-        down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render()))
-        dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render()))
+        up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render(keep_scroll=True)))
+        down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render(keep_scroll=True)))
+        dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render(keep_scroll=True)))
         delete.bind(on_release=lambda *_: self.confirm_delete_day(day["id"]))
         for w in (up, down, dup, delete):
             eyebrow.add_widget(w)
@@ -298,19 +317,19 @@ class ProgramScreen(Screen):
             card.add_widget(label(meta + f" · {len(day['exercises'])} hareket", size=14, color=MUTED, height=dp(20)))
 
         for i, ex in enumerate(day["exercises"]):
-            row = ClickableRow(size_hint_y=None, height=dp(36), spacing=dp(6))
+            row = ClickableRow(size_hint_y=None, height=dp(40), spacing=dp(6), padding=(0, dp(2)))
             row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
             with row.canvas.before:
-                Color(*BORDER)
-                rline = Line(points=[0, row.top, row.width, row.top], width=1)
+                Color(*DIVIDER)
+                rline = Line(points=[0, row.top, row.width, row.top], width=dp(1))
             row.bind(pos=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]),
                      size=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]))
-            row.add_widget(label(ex["name"], size=14.5))
+            row.add_widget(label(ex["name"], size=14.5, bold=True, color=TEXT))
             tgt = target_label(ex) or "hedef yok"
-            tgt_lbl = mono_label(tgt, size=14, color=TEXT)
+            tgt_lbl = mono_label(tgt, size=13.5, color=MUTED, halign="right", size_hint_x=None, width=dp(150))
             row.add_widget(tgt_lbl)
             rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
-            rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render()))
+            rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
             row.add_widget(rm)
             card.add_widget(row)
 
@@ -338,7 +357,7 @@ class ProgramScreen(Screen):
         popup = Popup(title="Günü Sil", content=content, size_hint=(0.85, 0.35))
         yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
         no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=lambda *_: (core.delete_program_day(app.state, day_id), app.save(), popup.dismiss(), self.render()))
+        yes.bind(on_release=lambda *_: (core.delete_program_day(app.state, day_id), app.save(), popup.dismiss(), self.render(keep_scroll=True)))
         no.bind(on_release=popup.dismiss)
         row.add_widget(no); row.add_widget(yes)
         content.add_widget(row)
@@ -449,7 +468,8 @@ class ProgramScreen(Screen):
         header.add_widget(title_row)
         tonnage = core.session_tonnage(sess)
         tonnage_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-        tonnage_row.add_widget(mono_label(f"{tonnage:g}", size=32, color=ACCENT, bold=True, height=dp(44)))
+        self._tonnage_lbl = mono_label(f"{tonnage:g}", size=32, color=ACCENT, bold=True, height=dp(44))
+        tonnage_row.add_widget(self._tonnage_lbl)
         tonnage_row.add_widget(label("kg", size=14, color=MUTED, height=dp(44)))
         header.add_widget(tonnage_row)
         col.add_widget(header)
@@ -512,82 +532,106 @@ class ProgramScreen(Screen):
         popup.open()
 
     def exercise_card(self, state, sess, ex, idx):
+        # Onceden her set eklendiginde/silindiginde TUM ekran (basliktan diger
+        # tum hareket kartlarina kadar) yeniden ciziliyordu - bu da her "+" ya
+        # basista gozle gorulur bir kasmaya sebep oluyordu. Simdi sadece BU
+        # kart kendi icerigini yeniden kuruyor (card.clear_widgets() + rebuild),
+        # digerlerine dokunulmuyor; ustteki tonaj sayaci da ayrica hafifce
+        # guncelleniyor (bkz. self.refresh_tonnage).
         app = App.get_running_app()
         card = Card(size_hint_y=None, spacing=dp(4))
         card.bind(minimum_height=card.setter("height"))
 
-        working = [s for s in ex["sets"] if not s.get("isWarmup")]
-        prev_max = core.max_weight_for(state, ex["name"])
-        head = BoxLayout(size_hint_y=None, height=dp(26))
-        head.add_widget(label(ex["name"], size=16, bold=True))
-        rm_ex = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
-        rm_ex.bind(on_release=lambda *_: (sess["exercises"].pop(idx), app.save(), self.render(keep_scroll=True)))
-        head.add_widget(rm_ex)
-        card.add_widget(head)
-        meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {prev_max:g}KG" if prev_max else "")
-        card.add_widget(mono_label(meta, size=14, color=MUTED, height=dp(20)))
+        def rebuild(*_):
+            card.clear_widgets()
+            working = [s for s in ex["sets"] if not s.get("isWarmup")]
+            prev_max = core.max_weight_for(state, ex["name"])
+            head = BoxLayout(size_hint_y=None, height=dp(26))
+            head.add_widget(label(ex["name"], size=16, bold=True))
+            rm_ex = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
+            rm_ex.bind(on_release=lambda *_: (sess["exercises"].pop(idx), app.save(), self.render(keep_scroll=True)))
+            head.add_widget(rm_ex)
+            card.add_widget(head)
+            meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {prev_max:g}KG" if prev_max else "")
+            card.add_widget(mono_label(meta, size=14, color=MUTED, height=dp(20)))
 
-        tgt = target_label(ex)
-        if tgt:
-            tgt_row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(6))
-            tgt_row.add_widget(label("HEDEF", size=14, bold=True, color=ACCENT, size_hint_x=None, width=dp(56)))
-            tgt_row.add_widget(mono_label(tgt, size=14, color=TEXT))
-            card.add_widget(tgt_row)
-        if ex.get("suggestedWeight") is not None:
-            txt = f"{ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
-            sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
-            sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
-            sug_row.add_widget(label(txt, size=14, color=STEEL))
-            card.add_widget(sug_row)
+            tgt = target_label(ex)
+            if tgt:
+                tgt_row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(6))
+                tgt_row.add_widget(label("HEDEF", size=14, bold=True, color=ACCENT, size_hint_x=None, width=dp(56)))
+                tgt_row.add_widget(mono_label(tgt, size=14, color=TEXT))
+                card.add_widget(tgt_row)
+            if ex.get("suggestedWeight") is not None:
+                txt = f"{ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
+                sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
+                sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
+                sug_row.add_widget(label(txt, size=14, color=STEEL))
+                card.add_widget(sug_row)
 
-        for si, s in enumerate(ex["sets"]):
-            row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
-            flag = "ISI" if s.get("isWarmup") else str(si + 1)
-            row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
-            row.add_widget(mono_label(f"{s['weight']:g}kg × {s['reps']}", size=14,
-                                       color=FAINT if s.get("isWarmup") else TEXT))
-            badge = core.rir_badge_info(s, ex)
-            if badge:
-                badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
-                row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
-            rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
-            rm.bind(on_release=lambda *_, i=idx, j=si: (core.remove_set(state, i, j), app.save(), self.render(keep_scroll=True)))
-            row.add_widget(rm)
-            card.add_widget(row)
+            for si, s in enumerate(ex["sets"]):
+                row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
+                flag = "ISI" if s.get("isWarmup") else str(si + 1)
+                row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
+                row.add_widget(mono_label(f"{s['weight']:g}kg × {s['reps']}", size=14,
+                                           color=FAINT if s.get("isWarmup") else TEXT))
+                badge = core.rir_badge_info(s, ex)
+                if badge:
+                    badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
+                    row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
+                rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
+                def do_remove(*_a, j=si):
+                    core.remove_set(state, idx, j)
+                    app.save()
+                    rebuild()
+                    self.refresh_tonnage()
+                rm.bind(on_release=do_remove)
+                row.add_widget(rm)
+                card.add_widget(row)
 
-        form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
-        w_input = dark_ti(hint_text=f"{ex.get('suggestedWeight') or ex.get('targetWeight') or 'kg'}",
-                             multiline=False, input_filter="float")
-        r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
-        add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
-        form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
-        card.add_widget(form)
+            form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
+            w_input = dark_ti(hint_text=f"{ex.get('suggestedWeight') or ex.get('targetWeight') or 'kg'}",
+                                 multiline=False, input_filter="float")
+            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
+            add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
+            form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
+            card.add_widget(form)
 
-        extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-        rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
-        warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_normal="", background_down="", background_color=RAISED, color=TEXT)
-        extra.add_widget(rir_input)
-        extra.add_widget(warm_toggle)
-        card.add_widget(extra)
+            extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
+            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
+            warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_normal="", background_down="", background_color=RAISED, color=TEXT)
+            extra.add_widget(rir_input)
+            extra.add_widget(warm_toggle)
+            card.add_widget(extra)
 
-        def submit(*_):
-            try:
-                w = float(w_input.text) if w_input.text.strip() else None
-                r = int(r_input.text) if r_input.text.strip() else None
-            except ValueError:
-                w = r = None
-            if not w or not r:
-                toast(app, "Geçerli değer gir")
-                return
-            rir = int(rir_input.text) if rir_input.text.strip().isdigit() else None
-            is_pr = core.add_set(state, idx, w, r, is_warmup=warm_toggle.state == "down", rir=rir)
-            app.save()
-            if is_pr:
-                toast(app, "YENİ REKOR — PR!")
-            self.render(keep_scroll=True)
+            def submit(*_):
+                try:
+                    w = float(w_input.text) if w_input.text.strip() else None
+                    r = int(r_input.text) if r_input.text.strip() else None
+                except ValueError:
+                    w = r = None
+                if not w or not r:
+                    toast(app, "Geçerli değer gir")
+                    return
+                rir = int(rir_input.text) if rir_input.text.strip().isdigit() else None
+                is_pr = core.add_set(state, idx, w, r, is_warmup=warm_toggle.state == "down", rir=rir)
+                app.save()
+                if is_pr:
+                    toast(app, "YENİ REKOR — PR!")
+                rebuild()
+                self.refresh_tonnage()
 
-        add_btn.bind(on_release=submit)
+            add_btn.bind(on_release=submit)
+
+        rebuild()
         return card
+
+    def refresh_tonnage(self):
+        """Set eklendiginde/silindiginde SADECE ustteki tonaj sayacini gunceller;
+        tum ekrani yeniden cizmekten (ve bunun yarattigi kasmadan) kacinir."""
+        app = App.get_running_app()
+        sess = app.state.get("activeSession")
+        if sess and getattr(self, "_tonnage_lbl", None) is not None:
+            self._tonnage_lbl.text = f"{core.session_tonnage(sess):g}"
 
 
 # ---------------------------------------------------------------------------
@@ -629,20 +673,37 @@ class HistoryScreen(Screen):
         head.add_widget(mono_label(f"{tonnage:g}kg", size=15, color=ACCENT, bold=True, halign="right"))
         card.add_widget(head)
 
-        for ex in s["exercises"]:
+        # Once set girilmis hareketler, sonra "SET GIRILMEDI" olanlar - boylece
+        # goz once tamamlanani tarar, bos olanlar listenin sonuna cekilir.
+        def sort_key(ex):
+            done = any(not st.get("isWarmup") for st in ex["sets"])
+            return (0 if done else 1)
+        sorted_exercises = sorted(s["exercises"], key=sort_key)
+
+        for i, ex in enumerate(sorted_exercises):
             cmp = core.history_exercise_compare(ex)
-            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(46), spacing=dp(2))
+            is_empty = cmp["delta"][0] == "none"
+            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(48), spacing=dp(3),
+                             padding=(0, dp(6), 0, dp(6)))
+            if i > 0:
+                with row.canvas.before:
+                    Color(*DIVIDER)
+                    rline = Line(points=[0, row.top, row.width, row.top], width=dp(1))
+                row.bind(pos=lambda w, *_, ln=rline: setattr(ln, 'points', [w.x, w.top, w.right, w.top]),
+                         size=lambda w, *_, ln=rline: setattr(ln, 'points', [w.x, w.top, w.right, w.top]))
+            name_color = FAINT if is_empty else TEXT
             top = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(6))
-            top.add_widget(label(ex["name"], size=14))
+            top.add_widget(label(ex["name"], size=14, color=name_color, bold=not is_empty))
             actual = "  ".join(f"{st['weight']:g}×{st['reps']}" for st in ex["sets"]) or "—"
-            top.add_widget(mono_label(actual, size=14, color=TEXT, halign="right"))
+            top.add_widget(mono_label(actual, size=14, color=(FAINT if is_empty else TEXT), halign="right"))
             row.add_widget(top)
             if cmp["hasTarget"]:
                 dtxt = cmp["delta"][1] or ""
                 color = {"up": ACCENT, "down": DANGER, "eq": STEEL, "none": FAINT}.get(cmp["delta"][0], FAINT)
                 sub_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(6))
-                sub_row.add_widget(mono_label("hedef " + target_label(ex), size=14, color=MUTED))
-                sub_row.add_widget(mono_label(dtxt, size=14, color=color, halign="right"))
+                sub_row.add_widget(mono_label("hedef " + target_label(ex), size=13, color=FAINT))
+                if dtxt:
+                    sub_row.add_widget(mono_label(dtxt, size=13, color=color, halign="right", bold=True))
                 row.add_widget(sub_row)
             card.add_widget(row)
         return card
@@ -775,24 +836,36 @@ class SettingsScreen(Screen):
 # ---------------------------------------------------------------------------
 # ANA UYGULAMA
 # ---------------------------------------------------------------------------
-class RootWidget(BoxLayout):
+class RootWidget(FloatLayout):
     def __init__(self, **kw):
-        super().__init__(orientation="vertical", **kw)
+        # Not: bu widget onceden BoxLayout idi ve toast_label (PR/kayit bildirimi)
+        # olusturulup hicbir yere eklenmiyordu (add_widget cagrisi eksikti) -
+        # yani "YENİ REKOR", "ANTRENMAN KAYDEDİLDİ" gibi bildirimler hicbir zaman
+        # goruntude cikmiyordu. FloatLayout'a gecip toast'u gercek bir kayan
+        # (overlay) etiket olarak eklendi.
+        super().__init__(**kw)
         bg_rect(self, BG)
+        main_col = BoxLayout(orientation="vertical", size_hint=(1, 1))
         self.sm = ScreenManager(transition=NoTransition())
         self.sm.add_widget(ProgramScreen(name="program"))
         self.sm.add_widget(HistoryScreen(name="history"))
         self.sm.add_widget(LibraryScreen(name="library"))
         self.sm.add_widget(ReportScreen(name="report"))
         self.sm.add_widget(SettingsScreen(name="settings"))
-        self.add_widget(self.sm)
+        main_col.add_widget(self.sm)
 
         nav = self.build_nav_bar()
-        self.add_widget(nav)
+        main_col.add_widget(nav)
+        self.add_widget(main_col)
 
-        self.toast_label = Label(text="", size_hint=(None, None), opacity=0,
-                                  color=(0.07, 0.08, 0.06, 1), bold=True)
-        bg_rect(self.toast_label, ACCENT)
+        self.toast_label = Label(text="", size_hint=(None, None), size=(dp(280), dp(44)),
+                                  pos_hint={"center_x": 0.5, "top": 0.97},
+                                  opacity=0, halign="center", valign="middle",
+                                  font_name="Oswald", bold=True,
+                                  color=(0.07, 0.08, 0.06, 1))
+        self.toast_label.bind(size=lambda *_: setattr(self.toast_label, "text_size", self.toast_label.size))
+        bg_rect(self.toast_label, ACCENT, radius=dp(8))
+        self.add_widget(self.toast_label)
 
     NAV_ITEMS = [("program", "PROGRAM"), ("history", "GEÇMİŞ"), ("library", "HAREKETLER"),
                  ("report", "RAPOR"), ("settings", "AYARLAR")]
@@ -841,9 +914,14 @@ class TonajApp(App):
     def build(self):
         self.title = "Tonaj"
         Window.clearcolor = BG
-        # Klavye acildiginda pencere yeniden boyutlanip odakli TextInput'u
-        # klavyenin USTUNDE tutar (varsayilanda klavye input'un uzerine biner).
-        Window.softinput_mode = "below_target"
+        # Android'in kendi AndroidManifest'i zaten "adjustResize" ile pencereyi
+        # klavye acilinca kucultuyor. Kivy'nin "below_target" modu BUNUN USTUNE
+        # ayrica manuel bir kaydirma hesaplayip pencereyi tekrar itiyor - iki
+        # ayri mekanizma cakisip klavye acilip kapanirken kasma/zipla(ma)ya
+        # sebep oluyordu. "resize" native davranisla ayni mantikta calisir,
+        # cakismayi onler; ekranda kalan bosluk problemini ise TextInput'lar
+        # odaklaninca ScrollView'i kaydiran dark_ti() (yukarida) cozuyor.
+        Window.softinput_mode = "resize"
         self.state, _ = core.load_state(get_data_path())
         self.root_widget = RootWidget()
         return self.root_widget
