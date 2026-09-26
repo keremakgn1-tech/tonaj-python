@@ -405,6 +405,20 @@ def history_exercise_compare(ex):
             delta = ("down", f"▼ {diff} KG")
         else:
             delta = ("eq", "HEDEFTE")
+    elif working and (ex.get("targetRepsMin") or ex.get("targetRepsMax")):
+        # Cogu program agirlik hedefi degil tekrar araligi kullaniyor (ornegin
+        # 3x6-8). Bu durumda gercek performansi araliga gore degerlendiriyoruz:
+        # tum setler tavana ulastiysa ilerleme zamani, herhangi biri tabanin
+        # altinda kaldiysa hedefin altinda, aksi halde araliktayiz demektir.
+        rmin = ex.get("targetRepsMin") or 0
+        rmax = ex.get("targetRepsMax") or rmin
+        reps = [s["reps"] for s in working]
+        if rmax and all(r >= rmax for r in reps):
+            delta = ("up", "▲ TAVANA ULAŞTI")
+        elif rmin and any(r < rmin for r in reps):
+            delta = ("down", "▼ HEDEFİN ALTINDA")
+        else:
+            delta = ("eq", "ARALIKTA")
     else:
         delta = (None, None)
 
