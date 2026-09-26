@@ -105,6 +105,9 @@ def sp_(v):
     return sp(v)
 
 
+_pending_scroll_event = [None]  # tek elemanli liste: modul-genelinde "son planlanan kaydirma"
+
+
 def dark_ti(**kw):
     """Kivy'nin varsayilan (acik renkli) TextInput'unu koyu temaya uydurur."""
     kw.setdefault("background_color", RAISED)
@@ -118,18 +121,29 @@ def dark_ti(**kw):
     ti = TextInput(**kw)
 
     def on_focus(instance, has_focus):
+        # Bir alandan digerine (mesela "kg" -> "tekrar") gecerken eski alanin
+        # once "focus=False", yeni alanin "focus=True" olayi gelir. Ikisi de
+        # kendi kaydirma animasyonunu planlarsa ust uste biner ve klavyenin
+        # kapanip-acilir gibi "sacma" gorunmesine katkida bulunur. Onceki
+        # bekleyen kaydirmayi iptal edip sadece SONUNCUSUNU calistiriyoruz.
+        if _pending_scroll_event[0] is not None:
+            _pending_scroll_event[0].cancel()
+            _pending_scroll_event[0] = None
         if not has_focus:
             return
-        # Klavye acilirken pencere yeniden boyutlanir (android:windowSoftInputMode
-        # adjustResize) ama ScrollView icerigi otomatik kaymaz; odaklanan kutuyu
-        # gorunur alana kaydiriyoruz. Klavye animasyonunun oturmasi icin kisa gecikme.
+
         def scroll_into_view(*_):
+            _pending_scroll_event[0] = None
             parent = instance.parent
             while parent is not None and not isinstance(parent, ScrollView):
                 parent = parent.parent
             if parent is not None:
                 parent.scroll_to(instance, padding=dp(24), animate=True)
-        Clock.schedule_once(scroll_into_view, 0.35)
+        # Android tarafinda pencere zaten "adjustResize" ile buyudugu/kucüldugu
+        # icin, alanlar arasi gecen odakta ekstra bir bekleme yerine hemen
+        # kaydirmak (asagida 0'a dusuruldu) daha az "ziplama" hissi veriyor -
+        # ilk klavye acilisinda zaten pencere buyumesi kendi animasyonunu yapiyor.
+        _pending_scroll_event[0] = Clock.schedule_once(scroll_into_view, 0.15)
 
     ti.bind(focus=on_focus)
     return ti
@@ -915,13 +929,18 @@ class TonajApp(App):
         self.title = "Tonaj"
         Window.clearcolor = BG
         # Android'in kendi AndroidManifest'i zaten "adjustResize" ile pencereyi
-        # klavye acilinca kucultuyor. Kivy'nin "below_target" modu BUNUN USTUNE
-        # ayrica manuel bir kaydirma hesaplayip pencereyi tekrar itiyor - iki
-        # ayri mekanizma cakisip klavye acilip kapanirken kasma/zipla(ma)ya
-        # sebep oluyordu. "resize" native davranisla ayni mantikta calisir,
-        # cakismayi onler; ekranda kalan bosluk problemini ise TextInput'lar
-        # odaklaninca ScrollView'i kaydiran dark_ti() (yukarida) cozuyor.
-        Window.softinput_mode = "resize"
+        # klavye acilinca kucultuyor/buyutuyor. Kivy'nin "below_target" MODU
+        # bunun ustune ayrica manuel bir kaydirma hesapliyordu (cakisiyordu).
+        # "resize" modu da benzer sekilde Window boyutunu KENDI BASINA ikinci
+        # kez ayarlamaya calisiyor - bu da iki hareket arasinda gecen odakta
+        # (kg -> tekrar gibi) klavyenin native olarak bir kapanip-acilma
+        # dongusune girdigi anlarda CIFT (native + Kivy) yeniden boyutlandirma
+        # animasyonu ust uste binip "klavye yeniden aciliyor sacma oluyor"
+        # hissini veriyordu. Bos string ("") ile Kivy kendi basina hicbir sey
+        # yapmiyor, sadece Android'in zaten dogru sekilde ayarladigi pencere
+        # boyutunu oldugu gibi kabul ediyor; odakli kutuyu gorunur alanda
+        # tutma isini ScrollView'i kaydiran dark_ti() (yukarida) zaten yapiyor.
+        Window.softinput_mode = ""
         self.state, _ = core.load_state(get_data_path())
         self.root_widget = RootWidget()
         return self.root_widget
