@@ -45,8 +45,8 @@ CARD2 = (0x23/255, 0x25/255, 0x29/255, 1)
 RAISED = (0x2A/255, 0x2D/255, 0x32/255, 1)
 BORDER = (0x2E/255, 0x31/255, 0x38/255, 1)
 TEXT = (0xF5/255, 0xF5/255, 0xF0/255, 1)
-MUTED = (0x8B/255, 0x8D/255, 0x93/255, 1)
-FAINT = (0x5C/255, 0x5F/255, 0x66/255, 1)
+MUTED = (0xA8/255, 0xAA/255, 0xB0/255, 1)
+FAINT = (0x82/255, 0x84/255, 0x8A/255, 1)
 ACCENT = (0xE8/255, 0xFF/255, 0x3D/255, 1)
 ACCENT_DARK = (0x0C/255, 0x1A/255, 0x02/255, 1)
 DANGER = (0xFF/255, 0x5A/255, 0x5A/255, 1)
@@ -90,7 +90,7 @@ def styled_button(text, color=ACCENT, text_color=(0.07, 0.08, 0.06, 1), **kw):
     return btn
 
 
-def label(text, size=15, color=TEXT, bold=False, halign="left", **kw):
+def label(text, size=16, color=TEXT, bold=False, halign="left", **kw):
     lb = Label(text=text, font_size=sp_(size), color=color, bold=bold,
                halign=halign, valign="middle", size_hint_y=None, **kw)
     lb.bind(size=lambda *_: setattr(lb, "text_size", lb.size))
@@ -116,7 +116,7 @@ def dark_ti(**kw):
     return TextInput(**kw)
 
 
-def mono_label(text, size=11, color=MUTED, halign="left", **kw):
+def mono_label(text, size=13, color=MUTED, halign="left", **kw):
     width = kw.pop("width", None)
     if width is not None:
         kw["size_hint_x"] = None
@@ -250,16 +250,16 @@ class ProgramScreen(Screen):
 
         eyebrow = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(8))
         if ordinal:
-            eyebrow.add_widget(mono_label(ordinal, size=11, color=FAINT, width=dp(20)))
+            eyebrow.add_widget(mono_label(ordinal, size=13, color=MUTED, width=dp(24)))
         if is_next:
-            sirada = Label(text="SIRADA", font_name="Oswald", font_size=sp_(11), bold=True,
+            sirada = Label(text="SIRADA", font_name="Oswald", font_size=sp_(12), bold=True,
                             color=ACCENT_DARK, size_hint=(None, None), size=(dp(72), dp(20)))
             bg_rect(sirada, ACCENT)
             eyebrow.add_widget(sirada)
         eyebrow.add_widget(BoxLayout())  # sag tarafi dolduran bosluk
         up = Button(text="↑", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
         down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
-        dup = Button(text="Kopya", size_hint=(None, None), size=(dp(48), dp(26)), background_color=(0,0,0,0), color=FAINT, font_size=sp_(10))
+        dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), dp(28)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(12))
         delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
         up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render()))
         down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render()))
@@ -287,7 +287,7 @@ class ProgramScreen(Screen):
                      size=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]))
             row.add_widget(label(ex["name"], size=13.5))
             tgt = target_label(ex) or "hedef yok"
-            tgt_lbl = mono_label(tgt, size=11, color=MUTED)
+            tgt_lbl = mono_label(tgt, size=13, color=TEXT)
             row.add_widget(tgt_lbl)
             rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
             rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render()))
@@ -421,7 +421,7 @@ class ProgramScreen(Screen):
         title_row = BoxLayout(size_hint_y=None, height=dp(22))
         title_row.add_widget(label(sess["dayName"] or "Serbest Antrenman", size=13, bold=True, color=MUTED))
         if sess["isDeload"]:
-            deload_tag = Label(text="DELOAD", font_name="Oswald", font_size=sp_(10), bold=True,
+            deload_tag = Label(text="DELOAD", font_name="Oswald", font_size=sp_(12), bold=True,
                                 color=ACCENT_DARK, size_hint=(None, None), size=(dp(62), dp(18)))
             bg_rect(deload_tag, ACCENT)
             title_row.add_widget(deload_tag)
@@ -504,31 +504,31 @@ class ProgramScreen(Screen):
         head.add_widget(rm_ex)
         card.add_widget(head)
         meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {prev_max:g}KG" if prev_max else "")
-        card.add_widget(mono_label(meta, size=10.5, color=FAINT, height=dp(18)))
+        card.add_widget(mono_label(meta, size=12.5, color=MUTED, height=dp(20)))
 
         tgt = target_label(ex)
         if tgt:
             tgt_row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(6))
-            tgt_row.add_widget(label("HEDEF", size=10.5, bold=True, color=ACCENT, size_hint_x=None, width=dp(48)))
-            tgt_row.add_widget(mono_label(tgt, size=11.5, color=TEXT))
+            tgt_row.add_widget(label("HEDEF", size=12, bold=True, color=ACCENT, size_hint_x=None, width=dp(56)))
+            tgt_row.add_widget(mono_label(tgt, size=13, color=TEXT))
             card.add_widget(tgt_row)
         if ex.get("suggestedWeight") is not None:
             txt = f"{ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
             sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
-            sug_row.add_widget(label("ÖNERİ", size=10.5, bold=True, color=STEEL, size_hint_x=None, width=dp(48)))
-            sug_row.add_widget(label(txt, size=11, color=STEEL))
+            sug_row.add_widget(label("ÖNERİ", size=12, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
+            sug_row.add_widget(label(txt, size=13, color=STEEL))
             card.add_widget(sug_row)
 
         for si, s in enumerate(ex["sets"]):
             row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
             flag = "ISI" if s.get("isWarmup") else str(si + 1)
-            row.add_widget(mono_label(f"{flag}", size=11, color=FAINT, width=dp(24)))
+            row.add_widget(mono_label(f"{flag}", size=13, color=MUTED, width=dp(28)))
             row.add_widget(mono_label(f"{s['weight']:g}kg × {s['reps']}", size=13,
                                        color=FAINT if s.get("isWarmup") else TEXT))
             badge = core.rir_badge_info(s, ex)
             if badge:
                 badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
-                row.add_widget(mono_label(badge["text"], size=10, color=badge_color, halign="right"))
+                row.add_widget(mono_label(badge["text"], size=12, color=badge_color, halign="right"))
             rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
             rm.bind(on_release=lambda *_, i=idx, j=si: (core.remove_set(state, i, j), app.save(), self.render()))
             row.add_widget(rm)
@@ -603,7 +603,7 @@ class HistoryScreen(Screen):
         title_col = BoxLayout(orientation="vertical")
         title_col.add_widget(label(dt.strftime("%d.%m.%Y"), size=15, bold=True, height=dp(18)))
         if s.get("dayName"):
-            title_col.add_widget(label(s["dayName"], size=10.5, color=FAINT, height=dp(14)))
+            title_col.add_widget(label(s["dayName"], size=12.5, color=MUTED, height=dp(18)))
         head.add_widget(title_col)
         head.add_widget(mono_label(f"{tonnage:g}kg", size=15, color=ACCENT, bold=True, halign="right"))
         card.add_widget(head)
@@ -614,14 +614,14 @@ class HistoryScreen(Screen):
             top = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(6))
             top.add_widget(label(ex["name"], size=13))
             actual = "  ".join(f"{st['weight']:g}×{st['reps']}" for st in ex["sets"]) or "—"
-            top.add_widget(mono_label(actual, size=11, color=MUTED, halign="right"))
+            top.add_widget(mono_label(actual, size=13, color=TEXT, halign="right"))
             row.add_widget(top)
             if cmp["hasTarget"]:
                 dtxt = cmp["delta"][1] or ""
                 color = {"up": ACCENT, "down": DANGER, "eq": STEEL, "none": FAINT}.get(cmp["delta"][0], FAINT)
                 sub_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(6))
-                sub_row.add_widget(mono_label("hedef " + target_label(ex), size=10, color=FAINT))
-                sub_row.add_widget(mono_label(dtxt, size=10, color=color, halign="right"))
+                sub_row.add_widget(mono_label("hedef " + target_label(ex), size=12, color=MUTED))
+                sub_row.add_widget(mono_label(dtxt, size=12, color=color, halign="right"))
                 row.add_widget(sub_row)
             card.add_widget(row)
         return card
@@ -653,11 +653,11 @@ class LibraryScreen(Screen):
             row = Card(size_hint_y=None, height=dp(58), orientation="horizontal", spacing=dp(8))
             info = BoxLayout(orientation="vertical")
             info.add_widget(label(n, size=14, bold=True, height=dp(20)))
-            info.add_widget(mono_label(f"{len(pts)} antrenman", size=10, color=FAINT, height=dp(16)))
+            info.add_widget(mono_label(f"{len(pts)} antrenman", size=12, color=MUTED, height=dp(18)))
             row.add_widget(info)
             pr_col = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(70))
             pr_col.add_widget(mono_label(f"{pr:g}kg", size=15, color=ACCENT, bold=True, halign="right", height=dp(22)))
-            pr_col.add_widget(label("PR", size=9.5, color=FAINT, halign="right", height=dp(14)))
+            pr_col.add_widget(label("PR", size=12, color=MUTED, halign="right", height=dp(18)))
             row.add_widget(pr_col)
             col.add_widget(row)
 
@@ -696,7 +696,7 @@ class ReportScreen(Screen):
         def stat_cell(value, unit_label):
             cell = BoxLayout(orientation="vertical")
             cell.add_widget(mono_label(value, size=22, color=ACCENT, bold=True, halign="center", height=dp(32)))
-            cell.add_widget(label(unit_label, size=10, color=FAINT, halign="center", height=dp(16)))
+            cell.add_widget(label(unit_label, size=12, color=MUTED, halign="center", height=dp(18)))
             return cell
         stats.add_widget(stat_cell(f"{tonnage:g}", "kg bu hafta"))
         stats.add_widget(stat_cell(str(count), "antrenman"))
@@ -705,7 +705,7 @@ class ReportScreen(Screen):
 
         vol = core.muscle_group_volume(state, "week", cur_key)
         if vol:
-            col.add_widget(label("KAS GRUBU BAZLI HAFTALIK HACİM", size=11.5, color=MUTED, bold=True, height=dp(24)))
+            col.add_widget(label("KAS GRUBU BAZLI HAFTALIK HACİM", size=13, color=MUTED, bold=True, height=dp(26)))
             for g, c in vol:
                 bar = Card(size_hint_y=None, height=dp(32), orientation="horizontal")
                 bar.add_widget(label(g, size=12, height=dp(20)))
@@ -793,7 +793,7 @@ class RootWidget(BoxLayout):
             cell = ClickableRow(orientation="vertical", padding=(0, 0, 0, dp(7)))
             indicator = Widget(size_hint_y=None, height=dp(2))
             ind_col = bg_rect(indicator, BG, radius=0)
-            lbl = Label(text=text, font_name="Oswald", font_size=sp_(10), bold=True, color=MUTED)
+            lbl = Label(text=text, font_name="Oswald", font_size=sp_(12), bold=True, color=MUTED)
             cell.add_widget(indicator)
             cell.add_widget(lbl)
             cell.bind(on_release=lambda *_, n=name: setattr(self.sm, "current", n))
