@@ -89,6 +89,38 @@ def bg_rect(widget, color, radius=None):
     return col
 
 
+def fit_popup_to_content(popup, content, extra=None, min_height=None, max_height_frac=0.9):
+    """
+    KOK NEDEN ("Hedef" ekranindaki orantisiz/bos gorunum): bazi popup'larin
+    icerigi (content) sabit yukseklikli (size_hint_y=None) widget'lardan
+    olusuyordu AMA content'in kendisi size_hint_y=None DEGILDI - yani content,
+    Popup'un ayrilan (orn. ekranin %85'i kadar) alanini doldurmaya calisiyordu.
+    Kivy'nin BoxLayout'u boyle bir durumda (hicbir cocuk esnemedigi icin) tum
+    icerigi popup'un ALT kismina yigiyor ve bosluk EN USTTE kaliyor - kullanicinin
+    gordugu "1. satirdan sonra kocaman bos alan, alanlar en altta" goruntusu
+    tam olarak buydu.
+
+    COZUM: content'i size_hint_y=None yapip minimum_height'ina bagliyoruz (kodun
+    baska yerlerinde zaten kullanilan standart desen), sonra bu fonksiyonla
+    Popup'un kendi yuksekligini content'in gercek ihtiyaci kadar (+ baslik
+    cubugu/kenar bosluklari icin bir pay) ayarliyoruz - boylece popup da
+    icerigi kadar kompakt gorunuyor, bos alan kalmiyor.
+    """
+    if extra is None:
+        extra = dp(72)  # Popup'un kendi baslik cubugu + ayirici + kenar boslugu payi
+    if min_height is None:
+        min_height = dp(120)
+
+    def update(*_):
+        from kivy.core.window import Window as _W
+        target = content.height + extra
+        cap = _W.height * max_height_frac
+        popup.height = max(min_height, min(target, cap))
+
+    content.bind(minimum_height=update)
+    update()
+
+
 class Card(BoxLayout):
     def __init__(self, **kw):
         kw.setdefault("orientation", "vertical")
@@ -192,6 +224,41 @@ def _patch_keyboard_focus_switch():
     WindowSDL._tonaj_kb_patched = True
 
 
+_focused_ti = [None]  # su an odakta olan (klavye acik) TextInput - yoksa None
+
+
+def _do_scroll_into_view(instance, animate=True):
+    parent = instance.parent
+    while parent is not None and not isinstance(parent, ScrollView):
+        parent = parent.parent
+    if parent is not None:
+        parent.scroll_to(instance, padding=dp(24), animate=animate)
+
+
+def _on_window_resize_rescroll(*_):
+    """
+    KOK NEDEN (videoda yakalanan "sacma goruntu"/kayma): hook.py sayesinde
+    Android artik klavye acilip kapanirken pencereyi GERCEKTEN native olarak
+    kucultup buyutuyor (adjustResize) - bu, bir onceki sorunu (klavyenin
+    icerigi kapatmasi) cozdu ama YENI bir sorun ortaya cikardi: bu native
+    yeniden-boyutlandirma islemi ANLIK degil, birkaç kare suren KUCUK BIR
+    ANIMASYON. ScrollView'in "scroll_y" degeri 0..1 arasinda bir ORAN'dir;
+    pencere/viewport yuksekligi bu animasyon sirasinda surekli degistigi
+    icin, SABIT KALAN o oran her karede FARKLI bir piksel konumuna denk
+    dusuyor - sonuc: bir-iki kare boyunca ekran icerigin disina (bos/beyaz
+    alana) kayiyor, sonra 150ms sonra calisan eski duzeltme nihayet yetisip
+    duzeltiyor. Iste o "1-2 karelik sicrama" budur.
+
+    COZUM: Pencere boyutu her degistiginde (yani tam olarak bu animasyonun
+    HER KaRESINDE), eger o an odakta bir TextInput varsa, onu HEMEN (animasyon
+    olmadan, gecikmesiz) tekrar gorunur alana kaydiriyoruz. Boylece ScrollView
+    hicbir zaman "eski orana gore hesaplanmis, artik geçersiz" bir konumda
+    kalmiyor - resize'in her karesinde konum taze tutuluyor.
+    """
+    if _focused_ti[0] is not None:
+        _do_scroll_into_view(_focused_ti[0], animate=False)
+
+
 def dark_ti(**kw):
     """Kivy'nin varsayilan (acik renkli) TextInput'unu koyu temaya uydurur."""
     kw.setdefault("background_color", RAISED)
@@ -214,19 +281,21 @@ def dark_ti(**kw):
             _pending_scroll_event[0].cancel()
             _pending_scroll_event[0] = None
         if not has_focus:
+            if _focused_ti[0] is instance:
+                _focused_ti[0] = None
             return
+        _focused_ti[0] = instance
 
         def scroll_into_view(*_):
             _pending_scroll_event[0] = None
-            parent = instance.parent
-            while parent is not None and not isinstance(parent, ScrollView):
-                parent = parent.parent
-            if parent is not None:
-                parent.scroll_to(instance, padding=dp(24), animate=True)
+            _do_scroll_into_view(instance, animate=True)
         # Android tarafinda pencere zaten "adjustResize" ile buyudugu/kucüldugu
         # icin, alanlar arasi gecen odakta ekstra bir bekleme yerine hemen
         # kaydirmak (asagida 0'a dusuruldu) daha az "ziplama" hissi veriyor -
         # ilk klavye acilisinda zaten pencere buyumesi kendi animasyonunu yapiyor.
+        # Resize animasyonunun HER KaRESI de ayrica _on_window_resize_rescroll
+        # ile (yukarida) anlik olarak duzeltiliyor - bu 150ms'lik cagri sadece
+        # animasyon TAMAMEN bittikten sonra son, yumusak bir hizalama yapiyor.
         _pending_scroll_event[0] = Clock.schedule_once(scroll_into_view, 0.15)
 
     ti.bind(focus=on_focus)
@@ -449,10 +518,12 @@ class ProgramScreen(Screen):
 
     def confirm_delete_day(self, day_id):
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12))
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
         content.add_widget(label("Bu günü silmek istediğine emin misin?"))
         row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Günü Sil", content=content, size_hint=(0.85, 0.35))
+        popup = Popup(title="Günü Sil", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
         yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
         no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
         yes.bind(on_release=lambda *_: (core.delete_program_day(app.state, day_id), app.save(), popup.dismiss(), self.render(keep_scroll=True)))
@@ -497,7 +568,8 @@ class ProgramScreen(Screen):
         day_obj = next((d for d in state["program"]["days"] if d["id"] == day["id"]), None)
         existing = next((e for e in day_obj["exercises"] if e["name"] == name), {}) if day_obj else {}
 
-        content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
+        content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
         content.add_widget(label(name, size=17, bold=True, height=dp(28)))
 
         def field(hint, val):
@@ -514,7 +586,8 @@ class ProgramScreen(Screen):
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
             content.add_widget(w)
 
-        popup = Popup(title="Hedef", content=content, size_hint=(0.9, 0.85))
+        popup = Popup(title="Hedef", content=content, size_hint=(0.9, None))
+        fit_popup_to_content(popup, content)
         save_btn = styled_button("Kaydet")
 
         def to_num(text, cast=int):
@@ -1028,6 +1101,7 @@ class TonajApp(App):
         # kaydiran dark_ti() (yukarida) hallediyor.
         Window.softinput_mode = ""
         _patch_keyboard_focus_switch()
+        Window.bind(size=_on_window_resize_rescroll)
         self.state, _ = core.load_state(get_data_path())
         self._save_pending = None
         self.root_widget = RootWidget()
