@@ -123,7 +123,7 @@ def default_state():
         "program": {"days": []},
         "muscleGroups": {},
         "bodyweightLog": [],
-        "settings": {"lastBackupAt": None},
+        "settings": {"lastBackupAt": None, "weightUnit": "kg"},
     }
 
 
@@ -284,6 +284,11 @@ def discard_session(state):
     state["activeSession"] = None
 
 
+def remove_history_session(state, session_id):
+    """Gecmisten TEK BIR antrenman kaydini kalici olarak siler (geri alinamaz)."""
+    state["history"] = [s for s in state["history"] if s["id"] != session_id]
+
+
 # ---------------------------------------------------------------------------
 # Program (gun) yonetimi
 # ---------------------------------------------------------------------------
@@ -394,15 +399,21 @@ def history_exercise_compare(ex):
     has_target = bool(ex.get("targetSets") or ex.get("targetRepsMin") or ex.get("targetRepsMax") or ex.get("targetWeight"))
     working = [s for s in ex["sets"] if not s.get("isWarmup")]
     best_weight = max((s["weight"] for s in working), default=0)
+    weight_diff_kg = None  # sadece agirlik-hedefi dalinda doldurulur (asagida)
 
     if not working and has_target:
         delta = ("none", "SET GİRİLMEDİ")
     elif ex.get("targetWeight"):
+        # NOT: burada kg-sabit bir metin YAZMIYORUZ artik - core.py agirlik
+        # birimini (kg/lb) bilmiyor/bilmemeli. Ham kg farkini weight_diff_kg
+        # olarak donduruyoruz; main.py bunu kullanicinin sectigi birimde
+        # kendi formatliyor (bkz. HistoryScreen.session_card).
         diff = round(best_weight - ex["targetWeight"], 2)
+        weight_diff_kg = diff
         if diff > 0:
-            delta = ("up", f"▲ +{diff} KG")
+            delta = ("up", None)
         elif diff < 0:
-            delta = ("down", f"▼ {diff} KG")
+            delta = ("down", None)
         else:
             delta = ("eq", "HEDEFTE")
     elif working and (ex.get("targetRepsMin") or ex.get("targetRepsMax")):
@@ -427,7 +438,8 @@ def history_exercise_compare(ex):
         done = len(working)
         sets_badge = (done, ex["targetSets"], "ok" if done >= ex["targetSets"] else "under")
 
-    return {"hasTarget": has_target, "delta": delta, "setsBadge": sets_badge, "bestWeight": best_weight}
+    return {"hasTarget": has_target, "delta": delta, "setsBadge": sets_badge, "bestWeight": best_weight,
+            "weightDiffKg": weight_diff_kg}
 
 
 # ---------------------------------------------------------------------------
