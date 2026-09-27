@@ -225,6 +225,7 @@ def _patch_keyboard_focus_switch():
 
 
 _focused_ti = [None]  # su an odakta olan (klavye acik) TextInput - yoksa None
+_pending_resize_rescroll = [None]  # resize sirasinda ust uste binen rescroll'lari onlemek icin
 
 
 def _do_scroll_into_view(instance, animate=True):
@@ -254,9 +255,23 @@ def _on_window_resize_rescroll(*_):
     olmadan, gecikmesiz) tekrar gorunur alana kaydiriyoruz. Boylece ScrollView
     hicbir zaman "eski orana gore hesaplanmis, artik geçersiz" bir konumda
     kalmiyor - resize'in her karesinde konum taze tutuluyor.
+
+    ONEMLI DUZELTME: Ilk halinde bu fonksiyon Window.size degisince HEMEN
+    (senkron) scroll_to() cagiriyordu. Otomatik testle kanitlandi ki bu
+    YANLIS: Window.size degistigi ANDA, ScrollView'in kendi height/layout'u
+    HENUZ guncellenmemis oluyor (Kivy'nin layout sistemi bunu bir sonraki
+    "frame"e erteliyor - Window.size ile ayni "tick" icinde degil). Yani
+    senkron cagrilan scroll_to(), ESKI (henuz kucultulmemis/buyutulmemis)
+    olcumler uzerinden hesap yapiyordu - pratikte hicbir sey duzeltmiyordu.
+    Simdi cagriyi bir sonraki frame'e erteliyoruz (Clock.schedule_once(...,0))
+    ki ScrollView'in gercek/guncel boyutu hazir olsun.
     """
-    if _focused_ti[0] is not None:
-        _do_scroll_into_view(_focused_ti[0], animate=False)
+    if _focused_ti[0] is not None and _pending_resize_rescroll[0] is None:
+        def _rescroll_next_frame(*_):
+            _pending_resize_rescroll[0] = None
+            if _focused_ti[0] is not None:
+                _do_scroll_into_view(_focused_ti[0], animate=False)
+        _pending_resize_rescroll[0] = Clock.schedule_once(_rescroll_next_frame, 0)
 
 
 def dark_ti(**kw):
