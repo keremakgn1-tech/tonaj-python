@@ -766,10 +766,20 @@ class ProgramScreen(Screen):
                     row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
                 rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
                 def do_remove(*_a, j=si):
+                    # "+" ile ayni sorunu onlemek icin ayni pattern: odakli
+                    # bir input varsa once klavyeyi kapat, agir rebuild()'i
+                    # bir sonraki kareye ertele (bkz. submit() ustundeki not).
+                    w_input.focus = False
+                    r_input.focus = False
+                    rir_input.focus = False
                     core.remove_set(state, idx, j)
                     app.save()
-                    rebuild()
-                    self.refresh_tonnage()
+
+                    def _finish_after_keyboard_settles(*_a2):
+                        rebuild()
+                        self.refresh_tonnage()
+
+                    Clock.schedule_once(_finish_after_keyboard_settles, 0)
                 rm.bind(on_release=do_remove)
                 row.add_widget(rm)
                 card.add_widget(row)
@@ -799,12 +809,41 @@ class ProgramScreen(Screen):
                     toast(app, "Geçerli değer gir")
                     return
                 rir = int(rir_input.text) if rir_input.text.strip().isdigit() else None
+                # KOK NEDEN (video ile dogrulandi, kare kare analiz): "+" basisi
+                # aninda kg/tekrar TextInput'lari hala odaklanmis (klavye acik)
+                # olabiliyor. "+" basilinca hem (a) klavye kapanmasi - Android'in
+                # native pencere kucaltma/buyutme animasyonunu tetikliyor - hem de
+                # (b) asagidaki rebuild() TUM karti (card) yikip yeniden kuruyor,
+                # AYNI olay/karede oluyordu. Bu iki farkli layout degisikligi
+                # (pencere native resize + kartin icerik yeniden kurulmasi) ayni
+                # kareye denk gelince, Kivy bir sonraki gercek "frame" cizilene
+                # kadar ScrollView'in eski scroll_y orani ile YENI (henuz
+                # kucalmemis/buyumemis) icerik boyutunu birlikte ciziyor - ekranda
+                # bir anlik siyah bosluk + eski icerigin garip bir yerde
+                # "yapiskan" gorunmesi (tam kullanicinin videoda yakaladigi sey)
+                # olusuyordu. Kendi kendine bir sonraki karede duzeliyordu ama o
+                # tek kare goze cok kotu batiyordu.
+                #
+                # COZUM: (1) odaklanmis inputlari BURADA elle odaktan cikarip
+                # klavye kapanma surecini hemen baslatiyoruz; (2) agir olan
+                # rebuild() islemini Clock.schedule_once ile BIR SONRAKI kareye
+                # erteliyoruz ki iki layout degisikligi ayni karede cakismasin -
+                # once pencere/klavye kapanma olayi kendi karesinde islensin,
+                # kartin yeniden kurulmasi ondan SONRAKI karede olsun.
+                w_input.focus = False
+                r_input.focus = False
+                rir_input.focus = False
+
                 is_pr = core.add_set(state, idx, w, r, is_warmup=warm_toggle.state == "down", rir=rir)
                 app.save()
                 if is_pr:
                     toast(app, "YENİ REKOR — PR!")
-                rebuild()
-                self.refresh_tonnage()
+
+                def _finish_after_keyboard_settles(*_a):
+                    rebuild()
+                    self.refresh_tonnage()
+
+                Clock.schedule_once(_finish_after_keyboard_settles, 0)
 
             add_btn.bind(on_release=submit)
 
