@@ -36,6 +36,7 @@ from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.properties import ObjectProperty
+from kivy.utils import platform
 
 import core
 
@@ -55,6 +56,57 @@ ACCENT = (0xE8/255, 0xFF/255, 0x3D/255, 1)
 ACCENT_DARK = (0x0C/255, 0x1A/255, 0x02/255, 1)
 DANGER = (0xFF/255, 0x5A/255, 0x5A/255, 1)
 STEEL = (0x5B/255, 0x7F/255, 0xB5/255, 1)
+
+# NOT: buildozer.spec'teki "version" ile ELLE senkron tutulmali (Ayarlar >
+# Hakkinda bolumunde gosteriliyor) - APK derlenirken otomatik okunmuyor,
+# cunku .spec dosyasi APK'nin icine gomulmuyor (source.include_exts'te yok).
+APP_VERSION = "1.0"
+
+
+# ---------------------------------------------------------------------------
+# Birim sistemi (kg / lb)
+# ---------------------------------------------------------------------------
+# ONEMLI: Depoda (kaydedilen JSON'da) agirlik HER ZAMAN kg olarak tutulur -
+# gecmis, hedefler, PR'lar, oneriler... hepsi kg. "lb" sadece bir GORUNUM
+# tercihi: kullanici Ayarlar'dan lb secerse, sadece EKRANDA gosterilen sayilar
+# ve kullanicinin YENI girdigi sayilarin depoya yazilmadan once kg'ye
+# cevrilmesi degisir. Bu sayede birim degistirmek eski verileri BOZMAZ/
+# yeniden yorumlamaz - her zaman ayni kg degerleri kalir, sadece farkli
+# bir cetvelle gosterilir.
+KG_PER_LB = 0.45359237
+
+
+def weight_unit():
+    try:
+        app = App.get_running_app()
+        return (app.state.get("settings") or {}).get("weightUnit", "kg")
+    except Exception:
+        return "kg"
+
+
+def to_display_weight(kg_value):
+    """Kg olarak saklanan bir degeri, kullanicinin sectigi birimde (sayi
+    olarak) dondurur - ekranda gosterme icin."""
+    if kg_value is None:
+        return None
+    return kg_value / KG_PER_LB if weight_unit() == "lb" else kg_value
+
+
+def to_storage_kg(display_value):
+    """Kullanicinin (secili birimde) girdigi bir sayiyi, depoya yazilacak
+    kg degerine cevirir."""
+    if display_value is None:
+        return None
+    return display_value * KG_PER_LB if weight_unit() == "lb" else display_value
+
+
+def fmt_weight(kg_value, decimals=True):
+    """Kg olarak saklanan bir degeri '70kg' / '154.3lb' gibi, birimiyle
+    birlikte hazir bir gosterim metnine cevirir."""
+    if kg_value is None:
+        return ""
+    v = to_display_weight(kg_value)
+    return f"{v:g}{weight_unit()}"
 
 
 def get_data_path():
@@ -338,7 +390,7 @@ def target_label(ex):
     elif reps:
         parts.append(f"{reps} tekrar")
     if ex.get("targetWeight"):
-        parts.append(f"{ex['targetWeight']}kg")
+        parts.append(fmt_weight(ex["targetWeight"]))
     if ex.get("targetRIR") is not None:
         parts.append(f"RIR {ex['targetRIR']}")
     return " · ".join(parts)
@@ -557,7 +609,9 @@ class ProgramScreen(Screen):
         sets_i = field("Set", existing.get("targetSets"))
         rmin_i = field("Tekrar min", existing.get("targetRepsMin"))
         rmax_i = field("Tekrar max", existing.get("targetRepsMax"))
-        w_i = field("Ağırlık (kg)", existing.get("targetWeight"))
+        # targetWeight depoda HER ZAMAN kg - kullaniciya kendi sectigi birimde
+        # gosteriyoruz, kaydederken (asagida do_save icinde) tekrar kg'ye ceviriyoruz.
+        w_i = field(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")))
         rir_i = field("RIR", existing.get("targetRIR"))
         rest_i = field("Dinlenme (sn)", existing.get("restSeconds"))
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
@@ -580,7 +634,8 @@ class ProgramScreen(Screen):
             core.set_day_exercise_target(
                 state, day["id"], name,
                 target_sets=to_num(sets_i.text), target_reps_min=to_num(rmin_i.text),
-                target_reps_max=to_num(rmax_i.text), target_weight=to_num(w_i.text, float),
+                target_reps_max=to_num(rmax_i.text),
+                target_weight=to_storage_kg(to_num(w_i.text, float)),
                 target_rir=to_num(rir_i.text), rest_seconds=to_num(rest_i.text),
             )
             app.save()
@@ -616,9 +671,9 @@ class ProgramScreen(Screen):
         header.add_widget(title_row)
         tonnage = core.session_tonnage(sess)
         tonnage_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-        self._tonnage_lbl = mono_label(f"{tonnage:g}", size=32, color=ACCENT, bold=True, height=dp(44))
+        self._tonnage_lbl = mono_label(f"{to_display_weight(tonnage):g}", size=32, color=ACCENT, bold=True, height=dp(44))
         tonnage_row.add_widget(self._tonnage_lbl)
-        tonnage_row.add_widget(label("kg", size=14, color=MUTED, height=dp(44)))
+        tonnage_row.add_widget(label(weight_unit(), size=14, color=MUTED, height=dp(44)))
         header.add_widget(tonnage_row)
         col.add_widget(header)
 
@@ -700,7 +755,7 @@ class ProgramScreen(Screen):
             rm_ex.bind(on_release=lambda *_: (sess["exercises"].pop(idx), app.save(), self.render(keep_scroll=True)))
             head.add_widget(rm_ex)
             card.add_widget(head)
-            meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {prev_max:g}KG" if prev_max else "")
+            meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {fmt_weight(prev_max).upper()}" if prev_max else "")
             card.add_widget(mono_label(meta, size=14, color=MUTED, height=dp(20)))
 
             tgt = target_label(ex)
@@ -710,7 +765,7 @@ class ProgramScreen(Screen):
                 tgt_row.add_widget(mono_label(tgt, size=14, color=TEXT))
                 card.add_widget(tgt_row)
             if ex.get("suggestedWeight") is not None:
-                txt = f"{ex['suggestedWeight']:g}kg — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
+                txt = f"{fmt_weight(ex['suggestedWeight'])} — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
                 sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
                 sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
                 sug_row.add_widget(label(txt, size=14, color=STEEL))
@@ -720,7 +775,7 @@ class ProgramScreen(Screen):
                 row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
                 flag = "ISI" if s.get("isWarmup") else str(si + 1)
                 row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
-                row.add_widget(mono_label(f"{s['weight']:g}kg × {s['reps']}", size=14,
+                row.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
                                            color=FAINT if s.get("isWarmup") else TEXT))
                 badge = core.rir_badge_info(s, ex)
                 if badge:
@@ -747,8 +802,9 @@ class ProgramScreen(Screen):
                 card.add_widget(row)
 
             form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
-            w_input = dark_ti(hint_text=f"{ex.get('suggestedWeight') or ex.get('targetWeight') or 'kg'}",
-                                 multiline=False, input_filter="float")
+            _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
+            w_hint = f"{to_display_weight(_sw):g}" if _sw else weight_unit()
+            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float")
             r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
             add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
             form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
@@ -796,7 +852,10 @@ class ProgramScreen(Screen):
                 r_input.focus = False
                 rir_input.focus = False
 
-                is_pr = core.add_set(state, idx, w, r, is_warmup=warm_toggle.state == "down", rir=rir)
+                # Kullanici agirligi kendi sectigi birimde (kg ya da lb) girdi -
+                # depoya HER ZAMAN kg olarak yaziyoruz (bkz. dosyanin basindaki
+                # birim-sistemi notu).
+                is_pr = core.add_set(state, idx, to_storage_kg(w), r, is_warmup=warm_toggle.state == "down", rir=rir)
                 app.save()
                 if is_pr:
                     toast(app, "YENİ REKOR — PR!")
@@ -818,7 +877,7 @@ class ProgramScreen(Screen):
         app = App.get_running_app()
         sess = app.state.get("activeSession")
         if sess and getattr(self, "_tonnage_lbl", None) is not None:
-            self._tonnage_lbl.text = f"{core.session_tonnage(sess):g}"
+            self._tonnage_lbl.text = f"{to_display_weight(core.session_tonnage(sess)):g}"
 
 
 # ---------------------------------------------------------------------------
@@ -828,9 +887,11 @@ class HistoryScreen(Screen):
     def on_pre_enter(self):
         self.render()
 
-    def render(self):
+    def render(self, keep_scroll=False):
         app = App.get_running_app()
         state = app.state
+        prev = _find_scrollview(self)
+        prev_scroll_y = prev.scroll_y if (keep_scroll and prev is not None) else None
         self.clear_widgets()
         scroll = ScrollView()
         col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10), padding=dp(12))
@@ -845,6 +906,34 @@ class HistoryScreen(Screen):
         scroll.add_widget(col)
         self.add_widget(scroll)
 
+        if prev_scroll_y is not None:
+            def restore(*_):
+                scroll.scroll_y = prev_scroll_y
+            Clock.schedule_once(restore, 0)
+
+    def confirm_delete_session(self, session_id):
+        app = App.get_running_app()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label("Bu antrenman kaydını kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz."))
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Antrenmanı Sil", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
+
+        def do_delete(*_):
+            core.remove_history_session(app.state, session_id)
+            app.save()
+            popup.dismiss()
+            self.render(keep_scroll=True)
+
+        yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
+        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        yes.bind(on_release=do_delete)
+        no.bind(on_release=popup.dismiss)
+        row.add_widget(no); row.add_widget(yes)
+        content.add_widget(row)
+        popup.open()
+
     def session_card(self, state, s):
         from datetime import datetime
         card = Card(size_hint_y=None, spacing=dp(4))
@@ -857,7 +946,11 @@ class HistoryScreen(Screen):
         if s.get("dayName"):
             title_col.add_widget(label(s["dayName"], size=14, color=MUTED, height=dp(18)))
         head.add_widget(title_col)
-        head.add_widget(mono_label(f"{tonnage:g}kg", size=15, color=ACCENT, bold=True, halign="right"))
+        head.add_widget(mono_label(fmt_weight(tonnage), size=15, color=ACCENT, bold=True, halign="right"))
+        del_btn = Button(text="×", size_hint=(None, None), size=(dp(28), dp(28)),
+                          background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(18))
+        del_btn.bind(on_release=lambda *_, sid=s["id"]: self.confirm_delete_session(sid))
+        head.add_widget(del_btn)
         card.add_widget(head)
 
         # Once set girilmis hareketler, sonra "SET GIRILMEDI" olanlar - boylece
@@ -881,11 +974,17 @@ class HistoryScreen(Screen):
             name_color = FAINT if is_empty else TEXT
             top = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(6))
             top.add_widget(label(ex["name"], size=14, color=name_color, bold=not is_empty))
-            actual = "  ".join(f"{st['weight']:g}×{st['reps']}" for st in ex["sets"]) or "—"
+            actual = "  ".join(f"{to_display_weight(st['weight']):g}×{st['reps']}" for st in ex["sets"]) or "—"
             top.add_widget(mono_label(actual, size=14, color=(FAINT if is_empty else TEXT), halign="right"))
             row.add_widget(top)
             if cmp["hasTarget"]:
                 dtxt = cmp["delta"][1] or ""
+                if cmp.get("weightDiffKg") is not None and not dtxt:
+                    # Agirlik-bazli fark: core.py kg olarak hesapladi, burada
+                    # kullanicinin sectigi birimde metni biz kuruyoruz.
+                    d = to_display_weight(cmp["weightDiffKg"])
+                    arrow = "▲ +" if d > 0 else "▼ "
+                    dtxt = f"{arrow}{d:g} {weight_unit().upper()}"
                 color = {"up": ACCENT, "down": DANGER, "eq": STEEL, "none": FAINT}.get(cmp["delta"][0], FAINT)
                 sub_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(6))
                 sub_row.add_widget(mono_label("hedef " + target_label(ex), size=13, color=FAINT))
@@ -925,8 +1024,16 @@ class LibraryScreen(Screen):
             info.add_widget(mono_label(f"{len(pts)} antrenman", size=14, color=MUTED, height=dp(18)))
             row.add_widget(info)
             pr_col = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(70))
-            pr_col.add_widget(mono_label(f"{pr:g}kg", size=15, color=ACCENT, bold=True, halign="right", height=dp(22)))
-            pr_col.add_widget(label("PR", size=14, color=MUTED, halign="right", height=dp(18)))
+            # HATA DUZELTMESI: pts bossa (bu harekete hic set girilmemisse - ör.
+            # bir antrenmana eklenip hic calisilmadan bitirilmis) eskiden yine de
+            # "0kg / PR" yaziyordu - bu, kullaniciya olmayan bir rekor varmis
+            # izlenimi veriyordu. Artik boyle durumda "—" gosteriliyor.
+            if pts:
+                pr_col.add_widget(mono_label(fmt_weight(pr), size=15, color=ACCENT, bold=True, halign="right", height=dp(22)))
+                pr_col.add_widget(label("PR", size=14, color=MUTED, halign="right", height=dp(18)))
+            else:
+                pr_col.add_widget(mono_label("—", size=15, color=FAINT, bold=True, halign="right", height=dp(22)))
+                pr_col.add_widget(label("yok", size=14, color=FAINT, halign="right", height=dp(18)))
             row.add_widget(pr_col)
             col.add_widget(row)
 
@@ -967,7 +1074,7 @@ class ReportScreen(Screen):
             cell.add_widget(mono_label(value, size=22, color=ACCENT, bold=True, halign="center", height=dp(32)))
             cell.add_widget(label(unit_label, size=14, color=MUTED, halign="center", height=dp(18)))
             return cell
-        stats.add_widget(stat_cell(f"{tonnage:g}", "kg bu hafta"))
+        stats.add_widget(stat_cell(f"{to_display_weight(tonnage):g}", f"{weight_unit()} bu hafta"))
         stats.add_widget(stat_cell(str(count), "antrenman"))
         stats.add_widget(stat_cell(str(len(prs)), "yeni rekor"))
         col.add_widget(stats)
@@ -989,35 +1096,288 @@ class ReportScreen(Screen):
 # AYARLAR EKRANI
 # ---------------------------------------------------------------------------
 class SettingsScreen(Screen):
+    # Android'in Storage Access Framework (SAF) sonuc kodlari - iki farkli
+    # islem (disa aktar / ice aktar) icin ayri kodlar, ayni anda ikisi de
+    # tetiklenirse birbirine karismasin diye.
+    _REQ_EXPORT = 4001
+    _REQ_IMPORT = 4002
+
     def on_pre_enter(self):
         self.render()
+
+    def section_header(self, text):
+        return label(text, size=14, color=MUTED, bold=True, height=dp(26))
 
     def render(self):
         app = App.get_running_app()
         self.clear_widgets()
-        col = BoxLayout(orientation="vertical", spacing=dp(10), padding=dp(12))
-        col.add_widget(label("Verilerin bu cihazda kalıcı olarak saklanıyor.", color=MUTED, height=dp(40)))
+        scroll = ScrollView()
+        col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10), padding=dp(12))
+        col.bind(minimum_height=col.setter("height"))
+
+        # ---- Birim sistemi ----
+        col.add_widget(self.section_header("BİRİM SİSTEMİ"))
+        cur_unit = weight_unit()
+
+        def set_unit(u, *_):
+            app.state.setdefault("settings", {})["weightUnit"] = u
+            app.save()
+            self.render()
+
+        unit_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        kg_btn = styled_button("KG", color=ACCENT if cur_unit == "kg" else RAISED,
+                                text_color=ACCENT_DARK if cur_unit == "kg" else TEXT)
+        lb_btn = styled_button("LB", color=ACCENT if cur_unit == "lb" else RAISED,
+                                text_color=ACCENT_DARK if cur_unit == "lb" else TEXT)
+        kg_btn.bind(on_release=lambda *_: set_unit("kg"))
+        lb_btn.bind(on_release=lambda *_: set_unit("lb"))
+        unit_row.add_widget(kg_btn); unit_row.add_widget(lb_btn)
+        col.add_widget(unit_row)
+        col.add_widget(label(
+            "Tüm ağırlıklar bu birimde gösterilir. Kayıtlı veri her zaman kg "
+            "olarak tutulur, birim değiştirmek geçmiş verini bozmaz.",
+            color=FAINT, size=13, height=dp(40)))
+
+        # ---- Yedekleme ----
+        col.add_widget(self.section_header("YEDEKLEME"))
+        last_backup = app.state.get("settings", {}).get("lastBackupAt")
+        if last_backup:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(last_backup / 1000)
+            info_txt = f"Son yedekleme: {dt.strftime('%d.%m.%Y %H:%M')}"
+        else:
+            info_txt = "Henüz hiç yedek almadın."
+        col.add_widget(label(info_txt, color=FAINT, size=14, height=dp(24)))
+
         export_btn = styled_button("Yedeği Dışa Aktar")
         export_btn.bind(on_release=lambda *_: self.export_backup())
         col.add_widget(export_btn)
-        self.add_widget(col)
 
-    def export_backup(self):
-        import json
-        import time
+        import_btn = styled_button("Yedekten Geri Yükle", color=RAISED, text_color=TEXT)
+        import_btn.bind(on_release=lambda *_: self.confirm_import_backup())
+        col.add_widget(import_btn)
+
+        col.add_widget(label(
+            "Dışa aktarırken kayıt yerini telefonunda sen seçersin (İndirilenler, "
+            "Drive, vb.). Geri yükleme MEVCUT tüm verinin üzerine yazar.",
+            color=FAINT, size=13, height=dp(56)))
+
+        # ---- Veri yonetimi ----
+        col.add_widget(self.section_header("VERİ YÖNETİMİ"))
+        reset_btn = styled_button("Tüm Verileri Sıfırla", color=RAISED, text_color=DANGER)
+        reset_btn.bind(on_release=lambda *_: self.confirm_reset_all())
+        col.add_widget(reset_btn)
+        col.add_widget(label(
+            "Programını, geçmişini ve tüm kayıtlarını siler; uygulama sıfırdan "
+            "kurulmuş gibi olur. Önce yedek almanı öneririz.",
+            color=FAINT, size=13, height=dp(40)))
+
+        # ---- Hakkinda ----
+        col.add_widget(self.section_header("HAKKINDA"))
+        col.add_widget(label(f"Tonaj — sürüm {APP_VERSION}", color=FAINT, size=14, height=dp(22)))
+        col.add_widget(label("Verilerin bu cihazda kalıcı olarak saklanıyor.", color=FAINT, size=14, height=dp(22)))
+
+        scroll.add_widget(col)
+        self.add_widget(scroll)
+
+    def confirm_reset_all(self):
         app = App.get_running_app()
-        try:
-            downloads = os.path.join(app.user_data_dir, "yedekler")
-            os.makedirs(downloads, exist_ok=True)
-            fname = f"tonaj-yedek-{time.strftime('%Y-%m-%d')}.json"
-            path = os.path.join(downloads, fname)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(app.state, f, ensure_ascii=False, indent=2)
-            app.state["settings"]["lastBackupAt"] = core.now_ms()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label(
+            "TÜM programın, antrenman geçmişin ve ayarların KALICI olarak "
+            "silinecek. Bu işlem GERİ ALINAMAZ. Devam etmeden önce yedek "
+            "almanı öneririz.", color=TEXT))
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Tüm Verileri Sıfırla", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
+
+        def do_reset(*_):
+            app.state = core.default_state()
             app.save()
-            toast(app, f"Yedek kaydedildi: {path}")
+            popup.dismiss()
+            self.render()
+            toast(app, "Tüm veriler sıfırlandı")
+
+        yes = styled_button("Evet, Sıfırla", color=DANGER, text_color=(1, 1, 1, 1))
+        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        yes.bind(on_release=do_reset)
+        no.bind(on_release=popup.dismiss)
+        row.add_widget(no); row.add_widget(yes)
+        content.add_widget(row)
+        popup.open()
+
+    # ------------------------------------------------------------------
+    # DISA AKTAR (export) - Android'in "Storage Access Framework" (SAF)
+    # dosya kaydetme dialogu ile: kullanici KENDI SECTIGI bir konuma
+    # (Indirilenler, Drive, baska bir klasor...) kaydedebiliyor. Onceki
+    # surum sadece uygulamanin kendi ozel/gizli klasorune yaziyordu -
+    # kullanici Dosyalar uygulamasindan o dosyayi hicbir zaman goremiyordu.
+    # ------------------------------------------------------------------
+    def export_backup(self):
+        app = App.get_running_app()
+        import time
+        fname = f"tonaj-yedek-{time.strftime('%Y-%m-%d')}.json"
+        payload = json.dumps(app.state, ensure_ascii=False, indent=2).encode("utf-8")
+
+        if platform != "android":
+            # Masaustunde (test/gelistirme) SAF yok - dosya secici yerine
+            # dogrudan calisma dizinine yaziyoruz ki en azindan islev test
+            # edilebilsin. Gercek cihazda asagidaki android dali calisir.
+            try:
+                path = os.path.join(os.getcwd(), fname)
+                with open(path, "wb") as f:
+                    f.write(payload)
+                app.state["settings"]["lastBackupAt"] = core.now_ms()
+                app.save()
+                self.render()
+                toast(app, f"Yedek kaydedildi: {path}")
+            except Exception as e:
+                toast(app, f"Yedekleme hatası: {e}")
+            return
+
+        try:
+            from jnius import autoclass
+            from android import activity
+
+            Intent = autoclass("android.content.Intent")
+            Activity = autoclass("android.app.Activity")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+            intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("application/json")
+            intent.putExtra(Intent.EXTRA_TITLE, fname)
+
+            def on_result(request_code, result_code, data_intent):
+                if request_code != self._REQ_EXPORT:
+                    return
+                activity.unbind(on_activity_result=on_result)
+                if result_code != Activity.RESULT_OK or data_intent is None:
+                    Clock.schedule_once(lambda *_: toast(app, "Dışa aktarma iptal edildi"))
+                    return
+                try:
+                    uri = data_intent.getData()
+                    resolver = PythonActivity.mActivity.getContentResolver()
+                    out_stream = resolver.openOutputStream(uri)
+                    out_stream.write(payload)
+                    out_stream.flush()
+                    out_stream.close()
+                    app.state["settings"]["lastBackupAt"] = core.now_ms()
+                    app.save()
+
+                    def _done(*_):
+                        self.render()
+                        toast(app, "Yedek kaydedildi")
+                    Clock.schedule_once(_done)
+                except Exception as e:
+                    Clock.schedule_once(lambda *_: toast(app, f"Yedekleme hatası: {e}"))
+
+            activity.bind(on_activity_result=on_result)
+            PythonActivity.mActivity.startActivityForResult(intent, self._REQ_EXPORT)
         except Exception as e:
-            toast(app, f"Yedekleme hatası: {e}")
+            toast(app, f"Yedekleme başlatılamadı: {e}")
+
+    # ------------------------------------------------------------------
+    # ICE AKTAR (import) - kullanicinin SECTIGI bir .json yedek dosyasini
+    # okuyup MEVCUT tum uygulama verisinin (program, gecmis, hareketler...)
+    # YERINE koyar. Yikici bir islem oldugu icin once onay istiyoruz.
+    # ------------------------------------------------------------------
+    def confirm_import_backup(self):
+        app = App.get_running_app()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label(
+            "Bir yedek dosyası seçeceksin. Seçtiğin dosyadaki veri, bu "
+            "cihazdaki TÜM mevcut programın/geçmişin/kayıtların YERİNE "
+            "geçecek. Bu işlem geri alınamaz. Devam edilsin mi?"))
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Yedekten Geri Yükle", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
+
+        def go(*_):
+            popup.dismiss()
+            self.import_backup()
+
+        yes = styled_button("Devam Et", color=DANGER, text_color=(1, 1, 1, 1))
+        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        yes.bind(on_release=go)
+        no.bind(on_release=popup.dismiss)
+        row.add_widget(no); row.add_widget(yes)
+        content.add_widget(row)
+        popup.open()
+
+    def import_backup(self):
+        app = App.get_running_app()
+
+        if platform != "android":
+            toast(app, "Bu özellik şu an sadece Android'de kullanılabilir")
+            return
+
+        try:
+            from jnius import autoclass
+            from android import activity
+
+            Intent = autoclass("android.content.Intent")
+            Activity = autoclass("android.app.Activity")
+            PythonActivity = autoclass("org.kivy.android.PythonActivity")
+
+            intent = Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            # "*/*" kullaniyoruz: bazi dosya yoneticileri .json'u
+            # "application/json" olarak degil "text/plain" gibi farkli bir
+            # mime ile isaretliyor - tur kisitlarsak kullanici kendi yedek
+            # dosyasini listede goremeyebilirdi. Icerigi zaten kendimiz
+            # dogruluyoruz (asagida).
+            intent.setType("*/*")
+
+            def on_result(request_code, result_code, data_intent):
+                if request_code != self._REQ_IMPORT:
+                    return
+                activity.unbind(on_activity_result=on_result)
+                if result_code != Activity.RESULT_OK or data_intent is None:
+                    Clock.schedule_once(lambda *_: toast(app, "Geri yükleme iptal edildi"))
+                    return
+                try:
+                    uri = data_intent.getData()
+                    resolver = PythonActivity.mActivity.getContentResolver()
+                    input_stream = resolver.openInputStream(uri)
+
+                    BufferedInputStream = autoclass("java.io.BufferedInputStream")
+                    ByteArrayOutputStream = autoclass("java.io.ByteArrayOutputStream")
+                    buffered = BufferedInputStream(input_stream)
+                    byte_out = ByteArrayOutputStream()
+                    chunk = bytearray(8192)
+                    while True:
+                        n = buffered.read(chunk, 0, len(chunk))
+                        if n == -1:
+                            break
+                        byte_out.write(chunk, 0, n)
+                    raw = bytes(byte_out.toByteArray())
+                    buffered.close()
+
+                    new_state = json.loads(raw.decode("utf-8"))
+                    missing = [k for k in ("history", "program", "library", "activeSession")
+                               if k not in new_state]
+                    if missing:
+                        raise ValueError(f"Geçersiz yedek dosyası (eksik alan: {', '.join(missing)})")
+
+                    new_state.setdefault("settings", {})
+                    new_state["settings"]["lastBackupAt"] = new_state["settings"].get("lastBackupAt")
+                    app.state = new_state
+                    app.save()
+
+                    def _done(*_):
+                        self.render()
+                        toast(app, "Yedek geri yüklendi")
+                    Clock.schedule_once(_done)
+                except Exception as e:
+                    Clock.schedule_once(lambda *_: toast(app, f"Geri yükleme hatası: {e}"))
+
+            activity.bind(on_activity_result=on_result)
+            PythonActivity.mActivity.startActivityForResult(intent, self._REQ_IMPORT)
+        except Exception as e:
+            toast(app, f"Geri yükleme başlatılamadı: {e}")
 
 
 # ---------------------------------------------------------------------------
