@@ -3,6 +3,8 @@ TONAJ - Antrenman Takibi (Kivy / Android)
 main.py, arayuzu (View) core.py'deki (Model/Logic) fonksiyonlara baglar.
 """
 import os
+import json
+import threading
 from kivy.core.text import LabelBase
 _FONT_DIR = os.path.dirname(os.path.abspath(__file__))
 def _f(name): return os.path.join(_FONT_DIR, name)
@@ -62,6 +64,18 @@ def get_data_path():
     except Exception:
         base = "."
     return os.path.join(base, "tonaj_state.json")
+
+
+def _write_json_string_to_file(path, payload):
+    """Onceden JSON'a cevrilmis (immutable) bir string'i diske atomik olarak
+    yazar. core.save_state ile ayni "gecici dosya + os.replace" mantigini
+    kullanir; sadece serialize etmeyi cagirandan (arka plan thread'inden
+    guvenli sekilde ayirmak icin) devralmiyor - bkz. TonajApp.save()."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(payload)
+    os.replace(tmp, path)
 
 
 def bg_rect(widget, color, radius=None):
@@ -1015,10 +1029,55 @@ class TonajApp(App):
         Window.softinput_mode = ""
         _patch_keyboard_focus_switch()
         self.state, _ = core.load_state(get_data_path())
+        self._save_pending = None
         self.root_widget = RootWidget()
         return self.root_widget
 
     def save(self):
+        # KOK NEDEN (genel "kasma" sikayeti): save() neredeyse HER tek
+        # etkilesimde (set ekleme/silme, gun tasima, egzersiz ekleme/cikarma,
+        # hedef kaydetme...) cagriliyordu ve HER cagrida core.save_state()
+        # TUM state'i (gecmis biriktikce buyuyen) JSON'a cevirip UI thread'inde
+        # SENKRON olarak diske yaziyordu. Bu, her dokunusta kisa bir donma
+        # yaratiyordu ve gecmis buyudukce daha da belirginlesiyordu - "genel
+        # bir kasma" tarifiyle tam olarak orttusuyor.
+        #
+        # DUZELTME (iki parca):
+        #  1) Art arda gelen save() cagrilarini TEK bir yazmaya birlestiriyoruz
+        #     (debounce) - ornegin bir antrenmanda ust uste "+" ya basildiginda
+        #     her tikta degil, kisa bir durgunluktan sonra TEK sefer yaziliyor.
+        #  2) Gercekten yazilacagi an, JSON serialize etme (hizli, CPU islemi)
+        #     ana thread'de yapiliyor ama DOSYAYA YAZMA (yavas ve ongorulemez
+        #     olan disk G/C) ayri bir thread'e devrediliyor - boylece UI thread'i
+        #     (dolayisiyla dokunma/animasyon tepkisi) hicbir zaman disk
+        #     yazimiyla bloke olmuyor. String immutable oldugu icin, o sirada
+        #     app.state degismeye devam etse bile yariş (race condition) riski
+        #     yok.
+        if self._save_pending is not None:
+            self._save_pending.cancel()
+        self._save_pending = Clock.schedule_once(self._flush_save, 0.5)
+
+    def _flush_save(self, *_):
+        self._save_pending = None
+        path = get_data_path()
+        try:
+            payload = json.dumps(self.state, ensure_ascii=False)
+        except Exception:
+            # Beklenmedik bir serialize hatasi olursa eski (senkron ama
+            # guvenilir) yola geri don - veri kaybetmemek daha onemli.
+            core.save_state(path, self.state)
+            return
+        threading.Thread(
+            target=_write_json_string_to_file, args=(path, payload), daemon=True
+        ).start()
+
+    def on_stop(self):
+        # Uygulama kapanirken bekleyen bir kayit varsa kaybetmeden hemen
+        # (senkron) yaz - kapanista kisa bir gecikme kabul edilebilir,
+        # onemli olan son degisikligin diske gitmesi.
+        if getattr(self, "_save_pending", None) is not None:
+            self._save_pending.cancel()
+            self._save_pending = None
         core.save_state(get_data_path(), self.state)
 
 
