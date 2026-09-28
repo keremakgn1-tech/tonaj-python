@@ -183,10 +183,20 @@ class Card(BoxLayout):
 
 
 def styled_button(text, color=ACCENT, text_color=(0.07, 0.08, 0.06, 1), **kw):
+    # KOK NEDEN (2. cokme - "Antrenman Notu Ekle" popup'unda "Kaydet"e basinca):
+    # size_hint_y/height burada HER ZAMAN sabit deger olarak Button(...)'a
+    # dogrudan geciliyordu, AYNI ZAMANDA cagiran da (open_note_editor) bu ikisini
+    # **kw icinde ayrica geciyordu - yani Button() constructor'ina size_hint_y
+    # ve height iki kere veriliyordu ("got multiple values for keyword argument").
+    # Bu da popup daha ACILIRKEN (Kaydet butonu olusturulurken) TypeError
+    # firlatip uygulamayi cokertiyordu. setdefault kullanarak cagiranin
+    # verdigi deger varsa ona saygi duyuyoruz, yoksa varsayilana duesuyoruz.
     kw.setdefault("font_name", "Oswald")
     kw.setdefault("font_size", sp_(14))
+    kw.setdefault("size_hint_y", None)
+    kw.setdefault("height", dp(46))
     btn = Button(text=tr_upper(text), background_normal="", background_down="", background_color=color,
-                 color=text_color, size_hint_y=None, height=dp(46), **kw)
+                 color=text_color, **kw)
     return btn
 
 
@@ -721,7 +731,16 @@ class ProgramScreen(Screen):
         app = App.get_running_app()
         sess = app.state["activeSession"]
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        ti = dark_ti(text=sess["note"], multiline=True, size_hint_y=1, height=None)
+        # KOK NEDEN (uygulamanin kapanmasi): height=None + size_hint_y=1 birlikte
+        # veriliyordu. Kivy'nin TextInput.height'i bir NumericProperty ve None
+        # DEGERINI KABUL ETMIYOR - constructor'da height=None gecmek
+        # "ValueError: None is not allowed for TextInput.height" firlatiyor.
+        # Bu hata bir buton event handler'i icinde (on_release) yakalanmadan
+        # firlatildigi icin butun uygulama cokuyordu ("Antrenman notu ekle"ye
+        # basinca kapanma sikayeti tam olarak buydu). size_hint_y=1 zaten
+        # yuksekligi ebeveyne gore otomatik ayarlayacagi icin height=None hic
+        # gerekli degildi - kaldirildi.
+        ti = dark_ti(text=sess["note"], multiline=True, size_hint_y=1)
         content.add_widget(ti)
         popup = Popup(title="Antrenman Notu", content=content, size_hint=(0.9, 0.6))
         save = styled_button("Kaydet", size_hint_y=None, height=dp(44))
