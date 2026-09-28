@@ -349,6 +349,22 @@ def dark_ti(**kw):
     kw.setdefault("hint_text_color", MUTED)
     kw.setdefault("cursor_color", ACCENT)
     kw.setdefault("padding", [dp(10), dp(10), dp(10), dp(10)])
+    # KOK NEDEN (gercek cihazdan alinan Android hata raporuyla dogrulandi):
+    # Kivy'nin TextInput.input_type ozelliginin VARSAYILANI 'text' DEGIL,
+    # 'null' - bu da Android'e inputType=TYPE_NULL (0) olarak gidiyor.
+    # TYPE_NULL, Android'e "bu alan normal bir metin alani degil, ham tus
+    # vurusu bekliyor" demek; bu yuzden Gboard gibi modern klavyeler boyle
+    # alanlarda ya PasswordIme moduna dusuyor ya da IME oturumunu
+    # milisaniyeler icinde acip kapatiyor (logcat'te dogrulandi) - klavye
+    # gorsel olarak acik gorunse de yazilan hicbir karakter alana ulasmiyor.
+    # Simdiye kadar denenen butun duzeltmeler (below_target/pan, Python
+    # surumu, focus-switch patch'i) bu asil sorunu HIC ELE ALMAMISTI -
+    # cunku hicbir TextInput'a input_type ACIKCA verilmemisti. Duzeltme:
+    # tum TextInput'lara varsayilan olarak input_type='text' veriyoruz
+    # (input_filter="float"/"int" zaten hangi karakterlerin kabul
+    # edilecegini ayrica kisitliyor, input_type sadece klavyenin/IME'nin
+    # TURUNU belirliyor).
+    kw.setdefault("input_type", "text")
     if "size_hint_y" not in kw and "height" not in kw:
         kw["size_hint_y"] = None
         kw["height"] = dp(40)
