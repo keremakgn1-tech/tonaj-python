@@ -6,7 +6,17 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
 version = 1.0
 
-requirements = python3,charset_normalizer==3.3.2,kivy==2.3.1
+# python3 versiyonu BILEREK 3.11.9'a sabitlendi (once bos birakilmisti - bu
+# durumda python-for-android varsayilan olarak en YENI Python surumunu
+# (derleme sirasinda 3.14.2) kullaniyordu). Kivy 2.3.1 Subat 2024'te
+# yayinlandi, Python 3.14 ise Ekim 2025'te - yani Kivy bu Python surumuyle
+# HICBIR ZAMAN test edilmedi. Klavyeden yazi girisinin TextInput'a hic
+# ulasmamasi + arka plana alip geri donunce uygulamanin tamamen siyah ekranda
+# donup kalmasi gibi dusuk seviyeli (native/Cython) garip davranislar, tam
+# olarak boyle bir ABI/surum uyumsuzlugunda beklenecek turden sorunlar.
+# 3.11.9, Kivy ekosisteminde en genis test edilmis ve buildozer belgelerinde
+# onerilen surumlerden biri - bu yuzden sectik.
+requirements = python3==3.11.9,charset_normalizer==3.3.2,kivy==2.3.1
 
 orientation = portrait
 fullscreen = 0
