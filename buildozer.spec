@@ -16,7 +16,15 @@ version = 1.0
 # olarak boyle bir ABI/surum uyumsuzlugunda beklenecek turden sorunlar.
 # 3.11.9, Kivy ekosisteminde en genis test edilmis ve buildozer belgelerinde
 # onerilen surumlerden biri - bu yuzden sectik.
-requirements = python3==3.11.9,charset_normalizer==3.3.2,kivy==2.3.1
+#
+# EK DUZELTME: ilk denemede sadece "python3==3.11.9" yazinca derleme
+# "python3 should have same version as hostpython3, 3.11.9 != 3.14.2" hatasiyla
+# patladi - python-for-android, capraz derleme sirasinda ANDROID icin
+# derlenen python3'ten AYRI olarak, derleme makinesinde (host'ta) calisan bir
+# "hostpython3" da kuruyor ve p4a bu ikisinin AYNI surum olmasini sart
+# kosuyor. hostpython3 icin surum belirtilmezse o da varsayilan en yeniyi
+# (3.14.2) aliyordu. Ikisini de ayni surume sabitliyoruz.
+requirements = python3==3.11.9,hostpython3==3.11.9,charset_normalizer==3.3.2,kivy==2.3.1
 
 orientation = portrait
 fullscreen = 0
