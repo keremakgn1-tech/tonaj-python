@@ -922,6 +922,15 @@ class HistoryScreen(Screen):
                     arrow = "▲ +" if d > 0 else "▼ "
                     dtxt = f"{arrow}{d:g} {weight_unit().upper()}"
                 color = {"up": ACCENT, "down": DANGER, "eq": STEEL, "none": FAINT}.get(cmp["delta"][0], FAINT)
+                # core.history_exercise_compare() hedeflenen set SAYISINA gore
+                # de bir bilgi (setsBadge) hesapliyordu ama hicbir yerde
+                # gosterilmiyordu - hedeften eksik kalinan setleri burada
+                # (kirmizi uyariyla) yuzeye cikariyoruz.
+                sets_badge = cmp.get("setsBadge")
+                if sets_badge and sets_badge[2] == "under":
+                    incomplete_txt = f"{sets_badge[0]}/{sets_badge[1]} SET"
+                    dtxt = f"{incomplete_txt} · {dtxt}" if dtxt else incomplete_txt
+                    color = DANGER
                 sub_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(6))
                 sub_row.add_widget(mono_label("hedef " + target_label(ex), size=13, color=FAINT))
                 if dtxt:
