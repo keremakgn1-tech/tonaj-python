@@ -1493,18 +1493,6 @@ class RootWidget(FloatLayout):
         bg_rect(self.toast_label, ACCENT, radius=dp(8))
         self.add_widget(self.toast_label)
 
-        # GECICI: telefonda GERCEKTEN hangi build'in calistigini (kod
-        # degisikliginin cihaza ulasip ulasmadigini) hicbir dosya gondermeden,
-        # tek bakista dogrulayabilmek icin - her ekranin en ustunde sabit
-        # duran, kucuk, gozden kacmayan bir build etiketi. Sorun cozulunce
-        # kaldirilacak.
-        self.build_tag = Label(text="build 0929-0052", size_hint=(None, None),
-                                size=(dp(160), dp(20)),
-                                pos_hint={"right": 0.99, "top": 0.995},
-                                halign="right", valign="middle",
-                                font_size=sp_(11), color=(1, 0.3, 0.3, 0.9))
-        self.build_tag.bind(size=lambda *_: setattr(self.build_tag, "text_size", self.build_tag.size))
-        self.add_widget(self.build_tag)
 
     NAV_ITEMS = [("program", "PROGRAM"), ("history", "GEÇMİŞ"), ("library", "HAREKETLER"),
                  ("report", "RAPOR"), ("settings", "AYARLAR")]
