@@ -589,34 +589,56 @@ class ProgramScreen(Screen):
         popup.open()
 
     def open_exercise_picker(self, day_id):
+        # KOK NEDEN ("Hareket Ekle"ye basinca donma hissi): bu fonksiyon
+        # ONCEDEN, TEK bir dokunma/on_release cagrisinin icinde, kutuphanedeki
+        # TUM hareketler icin (80'den fazla) tek tek Button widget'i olusturup
+        # her birinin metnini SENKRON olarak font'tan dokup dokusuna (texture)
+        # ceviriyordu - bu iş bu (guclu, yazilim GPU'lu) sunucuda hizli olsa
+        # da GERCEK bir telefonda (ozellikle ilk acilista, font glyph onbellegi
+        # bosken) fark edilir bir sure surebilir. O sure boyunca ekrana HICBIR
+        # SEY cizilmiyordu (popup'in kendisi de dahil) - kullaniciya "dokunma
+        # algilanmadi, uygulama dondu" hissi veren tam olarak buydu.
+        #
+        # DUZELTME: Once popup'i (baslik + bos/"Yükleniyor" govde ile) HEMEN
+        # aciyoruz - bu, dokunmanin algilandigini ANINDA gosteriyor. Asil agir
+        # is (80+ butonun olusturulmasi) bir sonraki Clock karesine
+        # devrediliyor - boylece popup'in kendi acilis cizimi ekrana yansidiktan
+        # SONRA buton listesi kuruluyor, "donma" hissi ortadan kalkiyor
+        # (toplam sure ayni ama kullanici artik bir tepki GORUYOR).
         app = App.get_running_app()
-        names = core.all_exercise_names(app.state)
         content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
-        scroll = ScrollView()
-        col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
-        col.bind(minimum_height=col.setter("height"))
-        popup = Popup(title="Hareket Seç", size_hint=(0.9, 0.8))
-        for n in names:
-            b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
-            b.bind(on_release=lambda *_, name=n: (popup.dismiss(), self.open_target_editor({"id": day_id}, name)))
-            col.add_widget(b)
-        scroll.add_widget(col)
-        content.add_widget(scroll)
-        newrow = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-        ti = dark_ti(hint_text="Yeni hareket adı", multiline=False)
-        addb = styled_button("Ekle")
-        def add_new(*_):
-            val = ti.text.strip()
-            if val:
-                if val not in app.state["library"]:
-                    app.state["library"].append(val)
-                popup.dismiss()
-                self.open_target_editor({"id": day_id}, val)
-        addb.bind(on_release=add_new)
-        newrow.add_widget(ti); newrow.add_widget(addb)
-        content.add_widget(newrow)
-        popup.content = content
+        loading_lbl = label("Yükleniyor…", color=MUTED, halign="center", height=dp(200))
+        content.add_widget(loading_lbl)
+        popup = Popup(title="Hareket Seç", size_hint=(0.9, 0.8), content=content)
         popup.open()
+
+        def build_list(*_a):
+            names = core.all_exercise_names(app.state)
+            content.clear_widgets()
+            scroll = ScrollView()
+            col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
+            col.bind(minimum_height=col.setter("height"))
+            for n in names:
+                b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
+                b.bind(on_release=lambda *_, name=n: (popup.dismiss(), self.open_target_editor({"id": day_id}, name)))
+                col.add_widget(b)
+            scroll.add_widget(col)
+            content.add_widget(scroll)
+            newrow = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+            ti = dark_ti(hint_text="Yeni hareket adı", multiline=False)
+            addb = styled_button("Ekle")
+            def add_new(*_):
+                val = ti.text.strip()
+                if val:
+                    if val not in app.state["library"]:
+                        app.state["library"].append(val)
+                    popup.dismiss()
+                    self.open_target_editor({"id": day_id}, val)
+            addb.bind(on_release=add_new)
+            newrow.add_widget(ti); newrow.add_widget(addb)
+            content.add_widget(newrow)
+
+        Clock.schedule_once(build_list, 0)
 
     def open_target_editor(self, day, name):
         app = App.get_running_app()
@@ -753,23 +775,34 @@ class ProgramScreen(Screen):
         popup.open()
 
     def add_adhoc_exercise(self):
+        # open_exercise_picker()'daki AYNI donma hissi buradaki 80+ hareketlik
+        # listede de vardi - AYNI cozum (once popup'i bos ac, buton listesini
+        # bir Clock karesi sonra kur) burada da uygulaniyor. Detay icin
+        # open_exercise_picker()'in basindaki yorum bloguna bak.
         app = App.get_running_app()
-        names = core.all_exercise_names(app.state)
         content = BoxLayout(orientation="vertical", padding=dp(10))
-        scroll = ScrollView()
-        col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
-        col.bind(minimum_height=col.setter("height"))
+        loading_lbl = label("Yükleniyor…", color=MUTED, halign="center", height=dp(200))
+        content.add_widget(loading_lbl)
         popup = Popup(title="Hareket Ekle", content=content, size_hint=(0.9, 0.8))
-        for n in names:
-            b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
-            def pick(*_, name=n):
-                core.add_exercise_to_session(app.state, name)
-                app.save(); popup.dismiss(); self.render()
-            b.bind(on_release=pick)
-            col.add_widget(b)
-        scroll.add_widget(col)
-        content.add_widget(scroll)
         popup.open()
+
+        def build_list(*_a):
+            names = core.all_exercise_names(app.state)
+            content.clear_widgets()
+            scroll = ScrollView()
+            col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
+            col.bind(minimum_height=col.setter("height"))
+            for n in names:
+                b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
+                def pick(*_, name=n):
+                    core.add_exercise_to_session(app.state, name)
+                    app.save(); popup.dismiss(); self.render()
+                b.bind(on_release=pick)
+                col.add_widget(b)
+            scroll.add_widget(col)
+            content.add_widget(scroll)
+
+        Clock.schedule_once(build_list, 0)
 
     def exercise_card(self, state, sess, ex, idx):
         # Onceden her set eklendiginde/silindiginde TUM ekran (basliktan diger
