@@ -26,14 +26,12 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.popup import Popup
 from kivy.uix.togglebutton import ToggleButton
-from kivy.uix.spinner import Spinner
 from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.widget import Widget
 from kivy.metrics import dp
 from kivy.clock import Clock
-from kivy.properties import ObjectProperty
 from kivy.utils import platform
 from kivy.base import ExceptionHandler, ExceptionManager
 
@@ -1209,7 +1207,15 @@ class SettingsScreen(Screen):
                         toast(app, "Yedek kaydedildi")
                     Clock.schedule_once(_done)
                 except Exception as e:
-                    Clock.schedule_once(lambda *_: toast(app, f"Yedekleme hatası: {e}"))
+                    # NOT: Python 3'te "except ... as e" blogu bitince e
+                    # OTOMATIK silinir - asagidaki gibi bir lambda'nin
+                    # icinde dogrudan e'yi yakalamaya calissaydik, lambda
+                    # (Clock tarafindan) daha SONRA cagrildiginda "e" artik
+                    # yok olmus olacagindan NameError firlatirdi. Once
+                    # duz bir yerel degiskene (err) kopyalayip lambda'nin
+                    # ONU yakalamasini sagliyoruz.
+                    err = e
+                    Clock.schedule_once(lambda *_: toast(app, f"Yedekleme hatası: {err}"))
 
             activity.bind(on_activity_result=on_result)
             PythonActivity.mActivity.startActivityForResult(intent, self._REQ_EXPORT)
@@ -1222,7 +1228,6 @@ class SettingsScreen(Screen):
     # YERINE koyar. Yikici bir islem oldugu icin once onay istiyoruz.
     # ------------------------------------------------------------------
     def confirm_import_backup(self):
-        app = App.get_running_app()
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
         content.add_widget(label(
@@ -1310,7 +1315,12 @@ class SettingsScreen(Screen):
                         toast(app, "Yedek geri yüklendi")
                     Clock.schedule_once(_done)
                 except Exception as e:
-                    Clock.schedule_once(lambda *_: toast(app, f"Geri yükleme hatası: {e}"))
+                    # bkz. export_backup()'taki ayni desendeki not: Clock
+                    # tarafindan sonra cagrilacak bir lambda "except as e"
+                    # blogu bitince silinen e'yi degil, buradaki duz "err"
+                    # kopyasini yakalamali.
+                    err = e
+                    Clock.schedule_once(lambda *_: toast(app, f"Geri yükleme hatası: {err}"))
 
             activity.bind(on_activity_result=on_result)
             PythonActivity.mActivity.startActivityForResult(intent, self._REQ_IMPORT)
