@@ -21,11 +21,9 @@ from kivy.app import App
 from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager, Screen, NoTransition
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.spinner import Spinner
@@ -184,14 +182,12 @@ class Card(BoxLayout):
 
 
 def styled_button(text, color=ACCENT, text_color=(0.07, 0.08, 0.06, 1), **kw):
-    # KOK NEDEN (2. cokme - "Antrenman Notu Ekle" popup'unda "Kaydet"e basinca):
-    # size_hint_y/height burada HER ZAMAN sabit deger olarak Button(...)'a
-    # dogrudan geciliyordu, AYNI ZAMANDA cagiran da (open_note_editor) bu ikisini
-    # **kw icinde ayrica geciyordu - yani Button() constructor'ina size_hint_y
-    # ve height iki kere veriliyordu ("got multiple values for keyword argument").
-    # Bu da popup daha ACILIRKEN (Kaydet butonu olusturulurken) TypeError
-    # firlatip uygulamayi cokertiyordu. setdefault kullanarak cagiranin
-    # verdigi deger varsa ona saygi duyuyoruz, yoksa varsayilana duesuyoruz.
+    # setdefault kullaniyoruz cunku bazi cagiranlar size_hint_y/height'i kendi
+    # **kw'si icinde ayrica veriyor - dogrudan Button(size_hint_y=None,
+    # height=..., **kw) yazsaydik, o zaman ayni anahtar iki kere verilmis
+    # olur ve Button() "got multiple values for keyword argument" hatasiyla
+    # patlardi. setdefault, cagiranin verdigi deger varsa ona saygi duyar,
+    # yoksa varsayilana duser.
     kw.setdefault("font_name", "Oswald")
     kw.setdefault("font_size", sp_(14))
     kw.setdefault("size_hint_y", None)
@@ -230,77 +226,83 @@ def sp_(v):
     return sp(v)
 
 
-_pending_scroll_event = [None]  # tek elemanli liste: modul-genelinde "son planlanan kaydirma"
+def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
+                  btn_width=None, row_height=None):
+    """Uygulamadaki HER sayisal deger girisi icin ortak, klavye ACMAYAN
+    bileşen. Android'de bazi cihazlarda (dogrulandi: Samsung + Gboard)
+    herhangi bir TextInput'a dokunulup klavye acilinca uygulama tamamen
+    donuyordu - input_type, softinput modu, manifest ayari gibi butun
+    Python/Kivy taraflı duzeltmeler denendi ve HICBIRI degistirmedi; yani
+    sorun native/Android tarafinda gercek bir kilitlenmeydi. Kok nedeni
+    bulmak yerine EN BASIT ve KESIN cozum uygulandi: uygulamada artik hicbir
+    yerde TextInput/klavye kullanilmiyor. Butun sayisal degerler (set,
+    tekrar, agirlik, RIR, dinlenme...) bu +/- sayaciyla giriliyor - kisa
+    dokunus bir adim, basili tutmak (0.4sn sonra) hizla tekrar eden
+    adimlarla degeri degistiriyor.
 
+    Donen widget'in ".value" ozelligi her zaman guncel (float ya da None)
+    degeri tutar.
+    """
+    btn_width = btn_width if btn_width is not None else dp(44)
+    row_h = row_height if row_height is not None else dp(40)
 
-_focused_ti = [None]  # su an odakta olan (klavye acik) TextInput - yoksa None
+    box = BoxLayout(orientation="vertical", size_hint_y=None,
+                     height=row_h + dp(18), spacing=dp(3))
+    box.value = float(val) if val not in (None, "") else None
 
+    box.add_widget(label(hint, size=12, color=MUTED, height=dp(16)))
 
-def _do_scroll_into_view(instance, animate=True):
-    parent = instance.parent
-    while parent is not None and not isinstance(parent, ScrollView):
-        parent = parent.parent
-    if parent is not None:
-        parent.scroll_to(instance, padding=dp(24), animate=animate)
+    row = BoxLayout(size_hint_y=None, height=row_h, spacing=dp(6))
+    minus = styled_button("−", color=RAISED, text_color=TEXT,
+                           size_hint_x=None, width=btn_width, height=row_h)
+    val_lbl = mono_label("—", size=16, color=TEXT, halign="center")
+    plus = styled_button("+", color=RAISED, text_color=TEXT,
+                          size_hint_x=None, width=btn_width, height=row_h)
 
+    def refresh():
+        if box.value is None:
+            val_lbl.text = "—"
+        else:
+            val_lbl.text = f"{box.value:g}" if decimals else str(int(round(box.value)))
 
-def dark_ti(**kw):
-    """Kivy'nin varsayilan (acik renkli) TextInput'unu koyu temaya uydurur."""
-    kw.setdefault("background_color", RAISED)
-    kw.setdefault("foreground_color", TEXT)
-    kw.setdefault("hint_text_color", MUTED)
-    kw.setdefault("cursor_color", ACCENT)
-    kw.setdefault("padding", [dp(10), dp(10), dp(10), dp(10)])
-    # KOK NEDEN (gercek cihazdan alinan Android hata raporuyla dogrulandi):
-    # Kivy'nin TextInput.input_type ozelliginin VARSAYILANI 'text' DEGIL,
-    # 'null' - bu da Android'e inputType=TYPE_NULL (0) olarak gidiyor.
-    # TYPE_NULL, Android'e "bu alan normal bir metin alani degil, ham tus
-    # vurusu bekliyor" demek; bu yuzden Gboard gibi modern klavyeler boyle
-    # alanlarda ya PasswordIme moduna dusuyor ya da IME oturumunu
-    # milisaniyeler icinde acip kapatiyor (logcat'te dogrulandi) - klavye
-    # gorsel olarak acik gorunse de yazilan hicbir karakter alana ulasmiyor.
-    # Simdiye kadar denenen butun duzeltmeler (below_target/pan, Python
-    # surumu, focus-switch patch'i) bu asil sorunu HIC ELE ALMAMISTI -
-    # cunku hicbir TextInput'a input_type ACIKCA verilmemisti. Duzeltme:
-    # tum TextInput'lara varsayilan olarak input_type='text' veriyoruz
-    # (input_filter="float"/"int" zaten hangi karakterlerin kabul
-    # edilecegini ayrica kisitliyor, input_type sadece klavyenin/IME'nin
-    # TURUNU belirliyor).
-    kw.setdefault("input_type", "text")
-    if "size_hint_y" not in kw and "height" not in kw:
-        kw["size_hint_y"] = None
-        kw["height"] = dp(40)
-    ti = TextInput(**kw)
+    def apply_delta(delta):
+        base = box.value if box.value is not None else 0
+        new = round(base + delta, 2)
+        if min_val is not None:
+            new = max(min_val, new)
+        if max_val is not None:
+            new = min(max_val, new)
+        box.value = new
+        refresh()
 
-    def on_focus(instance, has_focus):
-        # Bir alandan digerine (mesela "kg" -> "tekrar") gecerken eski alanin
-        # once "focus=False", yeni alanin "focus=True" olayi gelir. Ikisi de
-        # kendi kaydirma animasyonunu planlarsa ust uste biner ve klavyenin
-        # kapanip-acilir gibi "sacma" gorunmesine katkida bulunur. Onceki
-        # bekleyen kaydirmayi iptal edip sadece SONUNCUSUNU calistiriyoruz.
-        if _pending_scroll_event[0] is not None:
-            _pending_scroll_event[0].cancel()
-            _pending_scroll_event[0] = None
-        if not has_focus:
-            if _focused_ti[0] is instance:
-                _focused_ti[0] = None
-            return
-        _focused_ti[0] = instance
+    def make_hold(delta):
+        ev = [None]
 
-        def scroll_into_view(*_):
-            _pending_scroll_event[0] = None
-            _do_scroll_into_view(instance, animate=True)
-        # NOT: Klavyeden kacinma Android'in adjustResize'iyle (hook.py) native
-        # olarak hallediliyor - pencere klavye kadar kucalir, Kivy bunu normal
-        # Window.size degisimiyle otomatik ele alir. Bu kaydirma SADECE
-        # widget'i kendi ScrollView'i icinde (klavyeden bagimsiz olarak,
-        # ör. uzun bir listede yukarida/asagida kalmissa) gorunur yapmak icin -
-        # kucuk bir gecikmeyle cagirmak, odak hizlica bir alandan digerine
-        # atlarken (kg -> tekrar gibi) gereksiz ara kaydirmalari elimine ediyor.
-        _pending_scroll_event[0] = Clock.schedule_once(scroll_into_view, 0.15)
+        def _tick(*_):
+            apply_delta(delta)
 
-    ti.bind(focus=on_focus)
-    return ti
+        def start(*_):
+            apply_delta(delta)
+            ev[0] = Clock.schedule_interval(_tick, 0.12)
+
+        def stop(*_):
+            if ev[0] is not None:
+                ev[0].cancel()
+                ev[0] = None
+
+        return start, stop
+
+    m_start, m_stop = make_hold(-step)
+    p_start, p_stop = make_hold(step)
+    minus.bind(on_press=m_start, on_release=m_stop)
+    plus.bind(on_press=p_start, on_release=p_stop)
+
+    refresh()
+    row.add_widget(minus)
+    row.add_widget(val_lbl)
+    row.add_widget(plus)
+    box.add_widget(row)
+    return box
 
 
 def mono_label(text, size=14, color=MUTED, halign="left", **kw):
@@ -569,34 +571,16 @@ class ProgramScreen(Screen):
                 col.add_widget(b)
             scroll.add_widget(col)
             content.add_widget(scroll)
-            newrow = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-            ti = dark_ti(hint_text="Yeni hareket adı", multiline=False)
-            addb = styled_button("Ekle")
-            def add_new(*_):
-                val = ti.text.strip()
-                if val:
-                    if val not in app.state["library"]:
-                        app.state["library"].append(val)
-                    popup.dismiss()
-                    self.open_target_editor({"id": day_id}, val)
-            addb.bind(on_release=add_new)
-            newrow.add_widget(ti); newrow.add_widget(addb)
-            content.add_widget(newrow)
+            # NOT: serbest metinle "yeni hareket adi" ekleme kaldirildi -
+            # klavye acan tek yer buydu. Kutuphanede zaten onceden tanimli
+            # genis bir hareket listesi var (bkz. core.DEFAULT_EXERCISES),
+            # secim bu listeden yapiliyor.
 
         Clock.schedule_once(build_list, 0)
 
     def open_target_editor(self, day, name):
-        # KOK NEDEN ARANMASI BIRAKILDI, SORUN KAYNAGI KALDIRILDI: bu popup'taki
-        # alanlara (Set/Tekrar min/Tekrar max/Agirlik/RIR/Dinlenme) dokununca
-        # Android klavyesinin acilmasiyla birlikte butun uygulama donuyordu.
-        # Bircok farkli duzeltme (input_type, softinput modu, manifest ayari)
-        # denendi, hicbiri semptomu degistirmedi - yani sorun bizim Python
-        # tarafimizdaki bir ayar degil, klavye acilirken native/Android
-        # tarafinda olusan bir kilitlenme. Bunu daha fazla arastirmak yerine
-        # EN BASIT cozum uygulandi: bu alanlar artik hic klavye ACMIYOR.
-        # Deger girisi +/- butonlariyla yapiliyor (basili tutunca hizlanarak
-        # artar/azalir) - yani TextInput/klavye tamamen devre disi, donma da
-        # kokten ortadan kalkiyor.
+        # Bu popup'taki alanlar (Set/Tekrar min/Tekrar max/Agirlik/RIR/
+        # Dinlenme) klavye kullanmiyor - bkz. make_stepper() tanimindaki not.
         app = App.get_running_app()
         state = app.state
         day_obj = next((d for d in state["program"]["days"] if d["id"] == day["id"]), None)
@@ -606,74 +590,16 @@ class ProgramScreen(Screen):
         content.bind(minimum_height=content.setter("height"))
         content.add_widget(label(name, size=17, bold=True, height=dp(28)))
 
-        def stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None):
-            box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(58), spacing=dp(3))
-            box.value = float(val) if val not in (None, "") else None
-
-            box.add_widget(label(hint, size=12.5, color=MUTED, height=dp(16)))
-
-            row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
-            minus = styled_button("−", color=RAISED, text_color=TEXT, size_hint_x=None, width=dp(48))
-            val_lbl = mono_label("—", size=17, color=TEXT, halign="center")
-            plus = styled_button("+", color=RAISED, text_color=TEXT, size_hint_x=None, width=dp(48))
-
-            def refresh():
-                if box.value is None:
-                    val_lbl.text = "—"
-                else:
-                    val_lbl.text = f"{box.value:g}" if decimals else str(int(round(box.value)))
-
-            def apply_delta(delta):
-                base = box.value if box.value is not None else 0
-                new = round(base + delta, 2)
-                if min_val is not None:
-                    new = max(min_val, new)
-                if max_val is not None:
-                    new = min(max_val, new)
-                box.value = new
-                refresh()
-
-            def make_hold(delta):
-                # Kisa dokunusta bir adim, basili tutunca (0.4sn sonra) hizla
-                # tekrar eden adimlarla degeri degistirir.
-                ev = [None]
-
-                def _tick(*_):
-                    apply_delta(delta)
-
-                def start(*_):
-                    apply_delta(delta)
-                    ev[0] = Clock.schedule_interval(_tick, 0.12)
-
-                def stop(*_):
-                    if ev[0] is not None:
-                        ev[0].cancel()
-                        ev[0] = None
-
-                return start, stop
-
-            m_start, m_stop = make_hold(-step)
-            p_start, p_stop = make_hold(step)
-            minus.bind(on_press=m_start, on_release=m_stop)
-            plus.bind(on_press=p_start, on_release=p_stop)
-
-            refresh()
-            row.add_widget(minus)
-            row.add_widget(val_lbl)
-            row.add_widget(plus)
-            box.add_widget(row)
-            return box
-
-        sets_i = stepper("Set", existing.get("targetSets"), step=1)
-        rmin_i = stepper("Tekrar min", existing.get("targetRepsMin"), step=1)
-        rmax_i = stepper("Tekrar max", existing.get("targetRepsMax"), step=1)
+        sets_i = make_stepper("Set", existing.get("targetSets"), step=1)
+        rmin_i = make_stepper("Tekrar min", existing.get("targetRepsMin"), step=1)
+        rmax_i = make_stepper("Tekrar max", existing.get("targetRepsMax"), step=1)
         # targetWeight depoda HER ZAMAN kg - kullaniciya kendi sectigi birimde
         # gosteriyoruz, kaydederken (asagida do_save icinde) tekrar kg'ye ceviriyoruz.
         w_step = 2.5 if weight_unit() == "kg" else 5
-        w_i = stepper(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")),
-                      step=w_step, decimals=True)
-        rir_i = stepper("RIR", existing.get("targetRIR"), step=1, max_val=10)
-        rest_i = stepper("Dinlenme (sn)", existing.get("restSeconds"), step=15)
+        w_i = make_stepper(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")),
+                            step=w_step, decimals=True)
+        rir_i = make_stepper("RIR", existing.get("targetRIR"), step=1, max_val=10)
+        rest_i = make_stepper("Dinlenme (sn)", existing.get("restSeconds"), step=15)
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
             content.add_widget(w)
 
@@ -733,11 +659,6 @@ class ProgramScreen(Screen):
         header.add_widget(tonnage_row)
         col.add_widget(header)
 
-        note_btn = styled_button(("Not: " + sess["note"][:40]) if sess["note"] else "+ Antrenman notu ekle",
-                                  color=RAISED, text_color=TEXT)
-        note_btn.bind(on_release=lambda *_: self.open_note_editor())
-        col.add_widget(note_btn)
-
         for i, ex in enumerate(sess["exercises"]):
             col.add_widget(self.exercise_card(state, sess, ex, i))
 
@@ -755,30 +676,6 @@ class ProgramScreen(Screen):
 
         scroll.add_widget(col)
         return scroll
-
-    def open_note_editor(self):
-        app = App.get_running_app()
-        sess = app.state["activeSession"]
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10))
-        # KOK NEDEN (uygulamanin kapanmasi): height=None + size_hint_y=1 birlikte
-        # veriliyordu. Kivy'nin TextInput.height'i bir NumericProperty ve None
-        # DEGERINI KABUL ETMIYOR - constructor'da height=None gecmek
-        # "ValueError: None is not allowed for TextInput.height" firlatiyor.
-        # Bu hata bir buton event handler'i icinde (on_release) yakalanmadan
-        # firlatildigi icin butun uygulama cokuyordu ("Antrenman notu ekle"ye
-        # basinca kapanma sikayeti tam olarak buydu). size_hint_y=1 zaten
-        # yuksekligi ebeveyne gore otomatik ayarlayacagi icin height=None hic
-        # gerekli degildi - kaldirildi.
-        ti = dark_ti(text=sess["note"], multiline=True, size_hint_y=1)
-        content.add_widget(ti)
-        popup = Popup(title="Antrenman Notu", content=content, size_hint=(0.9, 0.6))
-        save = styled_button("Kaydet", size_hint_y=None, height=dp(44))
-        def do_save(*_):
-            sess["note"] = ti.text.strip()
-            app.save(); popup.dismiss(); self.render()
-        save.bind(on_release=do_save)
-        content.add_widget(save)
-        popup.open()
 
     def add_adhoc_exercise(self):
         # open_exercise_picker()'daki AYNI donma hissi buradaki 80+ hareketlik
@@ -859,91 +756,53 @@ class ProgramScreen(Screen):
                     row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
                 rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
                 def do_remove(*_a, j=si):
-                    # "+" ile ayni sorunu onlemek icin ayni pattern: odakli
-                    # bir input varsa once klavyeyi kapat, agir rebuild()'i
-                    # bir sonraki kareye ertele (bkz. submit() ustundeki not).
-                    w_input.focus = False
-                    r_input.focus = False
-                    rir_input.focus = False
                     core.remove_set(state, idx, j)
                     app.save()
-
-                    def _finish_after_keyboard_settles(*_a2):
-                        rebuild()
-                        self.refresh_tonnage()
-
-                    Clock.schedule_once(_finish_after_keyboard_settles, 0)
+                    rebuild()
+                    self.refresh_tonnage()
                 rm.bind(on_release=do_remove)
                 row.add_widget(rm)
                 card.add_widget(row)
 
-            form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
+            # Set eklerken kullanilan agirlik/tekrar/RIR alanlari - klavye
+            # acmayan +/- sayaci (bkz. make_stepper() tanimindaki not).
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
-            w_hint = f"{to_display_weight(_sw):g}" if _sw else weight_unit()
-            # input_type="number" geri alindi - bkz. yukaridaki field()
-            # icindeki aciklama (sayisal klavye bu cihazda yazi girisini
-            # tamamen engelliyordu).
-            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float")
-            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
-            add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
-            form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
+            w_step = 2.5 if weight_unit() == "kg" else 5
+            form = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
+            w_stepper = make_stepper(f"Ağırlık ({weight_unit()})", to_display_weight(_sw),
+                                      step=w_step, decimals=True)
+            r_stepper = make_stepper("Tekrar", ex.get("targetRepsMin"), step=1)
+            form.add_widget(w_stepper)
+            form.add_widget(r_stepper)
             card.add_widget(form)
 
-            extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
-            warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_normal="", background_down="", background_color=RAISED, color=TEXT)
-            extra.add_widget(rir_input)
+            extra = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
+            rir_stepper = make_stepper("RIR", ex.get("targetRIR"), step=1, max_val=10, btn_width=dp(36))
+            rir_stepper.size_hint_x = 0.4
+            warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.6, background_normal="", background_down="", background_color=RAISED, color=TEXT)
+            extra.add_widget(rir_stepper)
             extra.add_widget(warm_toggle)
             card.add_widget(extra)
 
+            add_btn = styled_button("+ Seti Ekle", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1))
+            card.add_widget(add_btn)
+
             def submit(*_):
-                try:
-                    w = float(w_input.text) if w_input.text.strip() else None
-                    r = int(r_input.text) if r_input.text.strip() else None
-                except ValueError:
-                    w = r = None
+                w = w_stepper.value
+                r = r_stepper.value
                 if not w or not r:
                     toast(app, "Geçerli değer gir")
                     return
-                rir = int(rir_input.text) if rir_input.text.strip().isdigit() else None
-                # KOK NEDEN (video ile dogrulandi, kare kare analiz): "+" basisi
-                # aninda kg/tekrar TextInput'lari hala odaklanmis (klavye acik)
-                # olabiliyor. "+" basilinca hem (a) klavye kapanmasi - Android'in
-                # native pencere kucaltma/buyutme animasyonunu tetikliyor - hem de
-                # (b) asagidaki rebuild() TUM karti (card) yikip yeniden kuruyor,
-                # AYNI olay/karede oluyordu. Bu iki farkli layout degisikligi
-                # (pencere native resize + kartin icerik yeniden kurulmasi) ayni
-                # kareye denk gelince, Kivy bir sonraki gercek "frame" cizilene
-                # kadar ScrollView'in eski scroll_y orani ile YENI (henuz
-                # kucalmemis/buyumemis) icerik boyutunu birlikte ciziyor - ekranda
-                # bir anlik siyah bosluk + eski icerigin garip bir yerde
-                # "yapiskan" gorunmesi (tam kullanicinin videoda yakaladigi sey)
-                # olusuyordu. Kendi kendine bir sonraki karede duzeliyordu ama o
-                # tek kare goze cok kotu batiyordu.
-                #
-                # COZUM: (1) odaklanmis inputlari BURADA elle odaktan cikarip
-                # klavye kapanma surecini hemen baslatiyoruz; (2) agir olan
-                # rebuild() islemini Clock.schedule_once ile BIR SONRAKI kareye
-                # erteliyoruz ki iki layout degisikligi ayni karede cakismasin -
-                # once pencere/klavye kapanma olayi kendi karesinde islensin,
-                # kartin yeniden kurulmasi ondan SONRAKI karede olsun.
-                w_input.focus = False
-                r_input.focus = False
-                rir_input.focus = False
-
+                rir = int(rir_stepper.value) if rir_stepper.value is not None else None
                 # Kullanici agirligi kendi sectigi birimde (kg ya da lb) girdi -
                 # depoya HER ZAMAN kg olarak yaziyoruz (bkz. dosyanin basindaki
                 # birim-sistemi notu).
-                is_pr = core.add_set(state, idx, to_storage_kg(w), r, is_warmup=warm_toggle.state == "down", rir=rir)
+                is_pr = core.add_set(state, idx, to_storage_kg(w), int(r), is_warmup=warm_toggle.state == "down", rir=rir)
                 app.save()
                 if is_pr:
                     toast(app, "YENİ REKOR — PR!")
-
-                def _finish_after_keyboard_settles(*_a):
-                    rebuild()
-                    self.refresh_tonnage()
-
-                Clock.schedule_once(_finish_after_keyboard_settles, 0)
+                rebuild()
+                self.refresh_tonnage()
 
             add_btn.bind(on_release=submit)
 
@@ -1591,18 +1450,12 @@ class TonajApp(App):
     def build(self):
         self.title = "Tonaj"
         Window.clearcolor = BG
-        # Klavye/metin girisi: Kivy'nin ve Android'in kendi varsayilan
-        # davranisina birakiyoruz (Window.softinput_mode ayarlanmiyor,
-        # manifest'te android:windowSoftInputMode="adjustResize" - bkz.
-        # hook.py). Daha once "below_target"/"pan" gibi ozel modlar ve
-        # request_keyboard/release_keyboard'u degistiren bir monkeypatch
-        # denenmisti; hicbiri asil sorunu (TextInput.input_type'in Kivy'de
-        # varsayilan olarak 'text' degil 'null' olmasi - bkz. dark_ti())
-        # cozmedi, sadece gereksiz karmasiklik ekledi. adjustResize'in
-        # eskiden neden oldugu dusunulen "beyaz/siyah flash" da aslinda
-        # ayri bir sorundu (KivySupportCutout stilinde windowBackground
-        # eksikligi) ve o hook.py'da kalici olarak duzeltildi - yani
-        # adjustResize'a donmek artik guvenli.
+        # Klavye: uygulamada artik HICBIR yerde TextInput/klavye kullanilmiyor
+        # (bkz. make_stepper() tanimindaki not) - butun sayisal degerler +/-
+        # sayaciyla giriliyor. Bu yuzden Window.softinput_mode ayarlamaya ya
+        # da klavye acilis/kapanisini yonetmeye hic gerek kalmadi; manifest'te
+        # android:windowSoftInputMode="adjustResize" (bkz. hook.py) sadece
+        # Android'in standart/varsayilan davranisi olarak duruyor.
         self.state, _ = core.load_state(get_data_path())
         self._save_pending = None
         self.root_widget = RootWidget()
