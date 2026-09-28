@@ -139,8 +139,12 @@ def load_state(path):
         if "muscleGroups" not in state or not state["muscleGroups"]:
             state["muscleGroups"] = data.get("muscleGroups", {})
         return state, False
+    # KULLANICI ISTEGI: yeni kurulumda ornek/varsayilan 3 gunluk program hic
+    # OLUSTURULMASIN - program bos baslasin, gunleri kullanici kendi ekleyecek.
+    # (Eskiden burada build_seed_program() cagrilip ornek bir program
+    # dolduruluyordu - artik program.days bos ([]) kalıyor, default_state()
+    # zaten boyle donuyor.)
     state = default_state()
-    state["program"] = build_seed_program()
     state["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
     save_state(path, state)
     return state, True
