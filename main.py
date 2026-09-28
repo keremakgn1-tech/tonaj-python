@@ -37,6 +37,7 @@ from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.properties import ObjectProperty
 from kivy.utils import platform
+from kivy.base import ExceptionHandler, ExceptionManager
 
 import core
 
@@ -1493,6 +1494,56 @@ class RootWidget(FloatLayout):
         Clock.schedule_once(lambda *_: setattr(self.toast_label, "opacity", 0), 1.6)
 
 
+# ---------------------------------------------------------------------------
+# COKME KORUMASI (VERI KAYBI ONLEME)
+# ---------------------------------------------------------------------------
+# Kullanicinin sordugu soru: "ani kapanmalarda bilgiler gider mi?" - dogru
+# cevap oncesinde uc farkli senaryo vardi:
+#   1) Kullanici normal sekilde uygulamayi kapatirsa (geri tusu/sistem):
+#      TonajApp.on_stop() zaten bekleyen kaydi senkron olarak diske yaziyordu
+#      - bu senaryoda veri kaybi YOKTU.
+#   2) Kullanici Ana Ekran tusuyla uygulamayi ARKA PLANA atarsa: Kivy'nin
+#      varsayilan on_pause() davranisi True donup uygulamayi "duraklatiyor"
+#      (kapatmiyor) - AMA save() 0.5 saniyelik bir gecikmeyle (debounce) diske
+#      yaziyor ve bu bekleme Clock uzerinden calisiyor; uygulama arka plandayken
+#      Android herhangi bir an bellek ihtiyaciyla surecini tamamen
+#      SONLANDIRABILIR - bu durumda o 0.5 saniyelik bekleyen kayit hic diske
+#      gitmemis olabilirdi. (asagidaki on_pause duzeltmesi bunu kapatiyor)
+#   3) Beklenmedik bir HATA/COKME olursa (tipki az once bulup duzelttigimiz
+#      "Antrenman Notu Ekle" hatalari gibi - ileride baska/bilinmeyen bir hata
+#      cikarsa da gecerli): Python'un normal calisma sekli, yakalanmayan bir
+#      exception'i dogrudan yukari firlatip programi sonlandirmaktir - bu,
+#      on_stop() GIBI "duzenli kapanis" adimlarini ATLAR, yani bekleyen
+#      kaydedilmemis degisiklik (son "+", son not, vs.) diske hic yazilmadan
+#      uygulama kapanirdi.
+#
+# COZUM: Kivy'nin ExceptionManager'ina GLOBAL bir handler kaydediyoruz. Bu,
+# UI event dongusu icinde (butona basma, on_release, vb.) yakalanmayan HER
+# exception'i - nereden gelirse gelsin, hangi buton/ekran olursa olsun -
+# once buradan geciriyor: state'i HEMEN (bekleme olmadan, senkron) diske
+# yaziyoruz, SONRA hatanin normal akisina (RAISE) izin veriyoruz. Yani
+# uygulama yine de kapanabilir (bu handler hatanin KENDISINI duzeltmez,
+# gelecekte cikabilecek baska bir hatayi da engellemez) AMA artik hangi
+# hata olursa olsun kullanicinin en son yaptigi degisiklik KAYBOLMAZ.
+class _CrashSaveHandler(ExceptionHandler):
+    def handle_exception(self, exception):
+        try:
+            app = App.get_running_app()
+            if app is not None and getattr(app, "state", None) is not None:
+                if getattr(app, "_save_pending", None) is not None:
+                    app._save_pending.cancel()
+                    app._save_pending = None
+                core.save_state(get_data_path(), app.state)
+        except Exception:
+            # Kayit sirasinda da bir sorun cikarsa bile orijinal hatanin
+            # normal akisini (asagidaki RAISE) engellemiyoruz.
+            pass
+        return ExceptionManager.RAISE
+
+
+ExceptionManager.add_handler(_CrashSaveHandler())
+
+
 class TonajApp(App):
     def build(self):
         self.title = "Tonaj"
@@ -1582,6 +1633,22 @@ class TonajApp(App):
             self._save_pending.cancel()
             self._save_pending = None
         core.save_state(get_data_path(), self.state)
+
+    def on_pause(self):
+        # KOK NEDEN: kullanici Ana Ekran tusuna basip uygulamayi ARKA PLANA
+        # attiginda (uygulamayi kapatmadan) Android bu event'i tetikliyor.
+        # save()'in 0.5 saniyelik "debounce" gecikmesi tam bu anda beklemede
+        # olabilir - ve uygulama arka plandayken Android'in surec bellek
+        # ihtiyaciyla uygulamayi HABERSIZ sonlandirma ihtimali her zaman var
+        # (on_stop() bu durumda CAGRILMAYABILIR). Bu yuzden arka plana her
+        # gecişte bekleyen kaydi burada da senkron olarak hemen diske yaziyoruz.
+        # True donmek Android'e "uygulamayi tamamen kapatma, sadece duraklat"
+        # diyor - yani kullanici geri donduğunde kaldigi yerden devam eder.
+        if getattr(self, "_save_pending", None) is not None:
+            self._save_pending.cancel()
+            self._save_pending = None
+        core.save_state(get_data_path(), self.state)
+        return True
 
 
 if __name__ == "__main__":
