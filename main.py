@@ -586,40 +586,94 @@ class ProgramScreen(Screen):
         Clock.schedule_once(build_list, 0)
 
     def open_target_editor(self, day, name):
+        # KOK NEDEN ARANMASI BIRAKILDI, SORUN KAYNAGI KALDIRILDI: bu popup'taki
+        # alanlara (Set/Tekrar min/Tekrar max/Agirlik/RIR/Dinlenme) dokununca
+        # Android klavyesinin acilmasiyla birlikte butun uygulama donuyordu.
+        # Bircok farkli duzeltme (input_type, softinput modu, manifest ayari)
+        # denendi, hicbiri semptomu degistirmedi - yani sorun bizim Python
+        # tarafimizdaki bir ayar degil, klavye acilirken native/Android
+        # tarafinda olusan bir kilitlenme. Bunu daha fazla arastirmak yerine
+        # EN BASIT cozum uygulandi: bu alanlar artik hic klavye ACMIYOR.
+        # Deger girisi +/- butonlariyla yapiliyor (basili tutunca hizlanarak
+        # artar/azalir) - yani TextInput/klavye tamamen devre disi, donma da
+        # kokten ortadan kalkiyor.
         app = App.get_running_app()
         state = app.state
         day_obj = next((d for d in state["program"]["days"] if d["id"] == day["id"]), None)
         existing = next((e for e in day_obj["exercises"] if e["name"] == name), {}) if day_obj else {}
 
-        content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10), size_hint_y=None)
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
         content.add_widget(label(name, size=17, bold=True, height=dp(28)))
 
-        def field(hint, val):
-            # input_type="number" GERI ALINDI: video kare-kare incelemesinde,
-            # bu formda klavyenin o oturumda ILK kez acildigi durumda bile
-            # (yani onceki "ayni acik klavyeyi degistirmeden kullanma"
-            # kisayoluyla hicbir ilgisi olmayan bir senaryoda) sayisal klavye
-            # goruluyor ama basilan tuslar ALANA HIC ULASMIYORDU. Bu, bu
-            # cihaz/Android surumunde Kivy'nin SDL2 metin-girisi koprusuyle
-            # "number" klavye tipinin duzgun calismadigi anlamina geliyor -
-            # bizim tarafimizdan (main.py icinde) duzeltilemeyecek, native
-            # bir uyumsuzluk. input_filter (sadece rakam/nokta kabul etme)
-            # zaten calisiyordu ve KALIYOR - sadece klavyenin GORUNUMU
-            # (tam klavye yerine sayisal tus takimi) eski haline donuyor.
-            ti = dark_ti(hint_text=hint, text=str(val) if val not in (None, "") else "",
-                            multiline=False, input_filter="float",
-                            size_hint_y=None, height=dp(40))
-            return ti
+        def stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None):
+            box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(58), spacing=dp(3))
+            box.value = float(val) if val not in (None, "") else None
 
-        sets_i = field("Set", existing.get("targetSets"))
-        rmin_i = field("Tekrar min", existing.get("targetRepsMin"))
-        rmax_i = field("Tekrar max", existing.get("targetRepsMax"))
+            box.add_widget(label(hint, size=12.5, color=MUTED, height=dp(16)))
+
+            row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+            minus = styled_button("−", color=RAISED, text_color=TEXT, size_hint_x=None, width=dp(48))
+            val_lbl = mono_label("—", size=17, color=TEXT, halign="center")
+            plus = styled_button("+", color=RAISED, text_color=TEXT, size_hint_x=None, width=dp(48))
+
+            def refresh():
+                if box.value is None:
+                    val_lbl.text = "—"
+                else:
+                    val_lbl.text = f"{box.value:g}" if decimals else str(int(round(box.value)))
+
+            def apply_delta(delta):
+                base = box.value if box.value is not None else 0
+                new = round(base + delta, 2)
+                if min_val is not None:
+                    new = max(min_val, new)
+                if max_val is not None:
+                    new = min(max_val, new)
+                box.value = new
+                refresh()
+
+            def make_hold(delta):
+                # Kisa dokunusta bir adim, basili tutunca (0.4sn sonra) hizla
+                # tekrar eden adimlarla degeri degistirir.
+                ev = [None]
+
+                def _tick(*_):
+                    apply_delta(delta)
+
+                def start(*_):
+                    apply_delta(delta)
+                    ev[0] = Clock.schedule_interval(_tick, 0.12)
+
+                def stop(*_):
+                    if ev[0] is not None:
+                        ev[0].cancel()
+                        ev[0] = None
+
+                return start, stop
+
+            m_start, m_stop = make_hold(-step)
+            p_start, p_stop = make_hold(step)
+            minus.bind(on_press=m_start, on_release=m_stop)
+            plus.bind(on_press=p_start, on_release=p_stop)
+
+            refresh()
+            row.add_widget(minus)
+            row.add_widget(val_lbl)
+            row.add_widget(plus)
+            box.add_widget(row)
+            return box
+
+        sets_i = stepper("Set", existing.get("targetSets"), step=1)
+        rmin_i = stepper("Tekrar min", existing.get("targetRepsMin"), step=1)
+        rmax_i = stepper("Tekrar max", existing.get("targetRepsMax"), step=1)
         # targetWeight depoda HER ZAMAN kg - kullaniciya kendi sectigi birimde
         # gosteriyoruz, kaydederken (asagida do_save icinde) tekrar kg'ye ceviriyoruz.
-        w_i = field(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")))
-        rir_i = field("RIR", existing.get("targetRIR"))
-        rest_i = field("Dinlenme (sn)", existing.get("restSeconds"))
+        w_step = 2.5 if weight_unit() == "kg" else 5
+        w_i = stepper(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")),
+                      step=w_step, decimals=True)
+        rir_i = stepper("RIR", existing.get("targetRIR"), step=1, max_val=10)
+        rest_i = stepper("Dinlenme (sn)", existing.get("restSeconds"), step=15)
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
             content.add_widget(w)
 
@@ -627,22 +681,18 @@ class ProgramScreen(Screen):
         fit_popup_to_content(popup, content)
         save_btn = styled_button("Kaydet")
 
-        def to_num(text, cast=int):
-            text = text.strip()
-            if not text:
+        def to_num(value, cast=int):
+            if value is None:
                 return None
-            try:
-                return cast(float(text)) if cast is int else float(text)
-            except ValueError:
-                return None
+            return cast(value)
 
         def do_save(*_):
             core.set_day_exercise_target(
                 state, day["id"], name,
-                target_sets=to_num(sets_i.text), target_reps_min=to_num(rmin_i.text),
-                target_reps_max=to_num(rmax_i.text),
-                target_weight=to_storage_kg(to_num(w_i.text, float)),
-                target_rir=to_num(rir_i.text), rest_seconds=to_num(rest_i.text),
+                target_sets=to_num(sets_i.value), target_reps_min=to_num(rmin_i.value),
+                target_reps_max=to_num(rmax_i.value),
+                target_weight=to_storage_kg(to_num(w_i.value, float)),
+                target_rir=to_num(rir_i.value), rest_seconds=to_num(rest_i.value),
             )
             app.save()
             popup.dismiss()
