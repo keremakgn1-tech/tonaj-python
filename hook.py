@@ -1,35 +1,25 @@
 """
 python-for-android build hook.
 
-GECMIS (TERK EDILEN) YAKLASIM: Once bu hook AndroidManifest.xml'e
-android:windowSoftInputMode="adjustResize" ekliyordu, cunku p4a'nin "_sdl_common"
-bootstrap sablonu bu ozniteligi hic koymuyor (klavye acilinca pencere hic
-native olarak kucalmiyordu - kod dogrulandi) ve bu da hem "klavyenin icerigi
-kapatmasi" hem de "alanlar arasi kayma" sikayetlerine yol aciyordu.
+Bu hook AndroidManifest.xml'e android:windowSoftInputMode="adjustResize"
+ekliyor - p4a'nin "_sdl_common" bootstrap sablonu bu ozniteligi hic koymuyor,
+yani eklenmezse klavye acilinca pencere hic native olarak kucalmiyor ve
+klavye alttaki alanlarin uzerini kapatiyor. adjustResize, Android'in klavye
+icin standart/en yaygin kullanilan yaklasimidir - pencere klavye kadar
+kucalip buyur, Kivy da normal Window.size degisimiyle bunu otomatik ele alir.
 
-adjustResize kismen ise yaradi ama video kare-kare analizinde YENI ve DAHA
-KOTU bir sorun ortaya cikardi: adjustResize, klavye her acilip kapandiginda
-Android'e pencerenin GERCEK GL yuzeyini (SurfaceView) yeniden boyutlandirmasini
-- yani onu yikip yeniden olusturmasini - soyluyor. Bu cihazda bu yeniden-olusturma
-sirasinda birkac kare boyunca ekran tamamen SIYAH kaliyordu (once beyaz kaliyordu,
-windowBackground duzeltmesinden sonra siyaha dondu ama sorunun kendisi - yuzeyin
-bosalmasi - devam etti). Bu main.py tarafindan cozulebilecek bir sey degildi -
-native yuzey yasam donguesunun kendisiydi.
-
-YENI COZUM: adjustResize yerine android:windowSoftInputMode="adjustPan"
-ekliyoruz. main.py da artik Kivy'nin SDL2/Android icin resmi olarak destekledigi
-Window.softinput_mode = "below_target" moduna gecti (bkz. main.py TonajApp.build).
-Bu kombinasyonda Android pencereyi/yuzeyi HICBIR ZAMAN yeniden boyutlandirmiyor -
-sadece odaklanmis TextInput'un GERCEK ekran konumu Kivy tarafindan bildirilip
-(SDL_SetTextInputRect - below_target modu) butun ekran GORSEL olarak o alan
-gorunur kalacak kadar kaydiriliyor (pan). Yuzey hic yikilmadigi/yeniden
-kurulmadigi icin o "siyah flash" / kayma artik olusmuyor.
+NOT: Daha once "below_target"/"pan" gibi ozel Kivy modlariyla adjustResize'in
+yerine adjustPan denenmisti (adjustResize'in klavye acilis/kapanisinda kisa
+bir "flash" gorunumune yol actigi dusunulmustu). O flash'in asil nedeni
+asagidaki KivySupportCutout/windowBackground eksikligiydi - o ayrica
+duzeltildi (bkz. asagisi) - bu yuzden en basit/standart yol olan
+adjustResize'a geri donuldu.
 """
 import os
 import re
 
 ACTIVITY_CLASS = "org.kivy.android.PythonActivity"
-_ATTR = 'android:windowSoftInputMode="adjustPan"'
+_ATTR = 'android:windowSoftInputMode="adjustResize"'
 
 _PATTERN = re.compile(
     r'(<activity\s+android:name="%s"[^>]*)(>)' % re.escape(ACTIVITY_CLASS)
@@ -53,7 +43,7 @@ def _patch(path):
     if count:
         with open(path, "w", encoding="utf-8") as f:
             f.write(new_xml)
-        print(f"[hook.py] {path}: windowSoftInputMode=\"adjustPan\" eklendi.")
+        print(f"[hook.py] {path}: windowSoftInputMode=\"adjustResize\" eklendi.")
     else:
         print(f"[hook.py] UYARI: {path} icinde ana activity etiketi eslesmedi, "
               f"windowSoftInputMode eklenemedi.")

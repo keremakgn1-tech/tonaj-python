@@ -233,104 +233,6 @@ def sp_(v):
 _pending_scroll_event = [None]  # tek elemanli liste: modul-genelinde "son planlanan kaydirma"
 
 
-def _patch_keyboard_focus_switch():
-    """
-    KOK NEDEN (Kivy 2.3.1 kaynak kodundan dogrulandi - kivy/core/window/window_sdl2.py):
-    WindowSDL.request_keyboard() her cagrildiginda ONCE (icten icrady cagirdigi
-    WindowBase.request_keyboard uzerinden) self.release_keyboard(...)'u tetikler,
-    ki WindowSDL.release_keyboard() de native "self._win.hide_keyboard()"yi
-    KOSULSUZ cagirir; ardindan WindowSDL.request_keyboard kendisi native
-    "self._win.show_keyboard()"yi tekrar KOSULSUZ cagirir. Yani "kg" alanindan
-    "tekrar" alanina (ya da klavye gerektiren baska bir alana) gecerken - klavye
-    zaten ekrandayken - Android'in native klavyesi HER SEFERINDE once kapatilip
-    sonra tekrar aciliyor. Kullanicinin gordugu "sacma goruntu" (flicker) tam
-    olarak budur; bu main.py'daki scroll/softinput ayarlarindan bagimsiz, dogrudan
-    Kivy'nin kendi WindowSDL.request_keyboard/release_keyboard uygulamasindan
-    kaynaklanan bir davranistir.
-
-    COZUM: Klavye zaten acikken (self._sdl_keyboard mevcut) baska bir alan odagi
-    alirsa, native gizle/goster cagrilarini tamamen atlayip WindowBase'in (SDL'siz)
-    temel request/release mantigini kullaniyoruz - bu da yalnizca klavyenin
-    hedefini/callback'ini gunceller, odagi eski alandan doguru sekilde alir,
-    ama native klavyeyi ekrandan hic kaldirmaz. Klavye yalnizca GERCEKTEN hicbir
-    alan odaklanmadiginda (native yol) kapatiliyor.
-    """
-    try:
-        from kivy.core.window.window_sdl2 import WindowSDL
-    except Exception:
-        return
-    win = Window
-    if not isinstance(win, WindowSDL):
-        return  # Android/SDL2 disinda (ör. bazi masaustu kurulumlar) dokunma
-    if getattr(WindowSDL, "_tonaj_kb_patched", False):
-        return  # zaten yamali (build() birden fazla kez cagrilmaz ama guvenlik icin)
-
-    from kivy.core.window import WindowBase
-
-    orig_request_keyboard = WindowSDL.request_keyboard
-    orig_release_keyboard = WindowSDL.release_keyboard
-
-    def patched_request_keyboard(self, callback, target, input_type='text',
-                                  keyboard_suggestions=True):
-        # KOK NEDEN (video ile dogrulanan "Hedef" formunda - ve sayisal
-        # klavyeli her alanda - yazi YAZILAMAMASI hatasi): asagidaki "klavyeyi
-        # kapatip acma" kisayolu (flicker'i onlemek icin) klavye zaten acikken
-        # HER ZAMAN devreye giriyordu - input_type FARKLI olsa bile (ornegin
-        # onceki alan "text" tipindeyken yeni alan "number" istiyorsa). Bu
-        # kisayol, native Android klavyesini GERCEKTEN yeniden olusturmadigi
-        # (sadece Kivy tarafinda hedef/callback degistirdigi) icin, native
-        # taraf hala ESKI input_type'in klavyesini/baglantisini kullanmaya
-        # devam ediyordu - ekranda dogru (sayisal) klavye gorunse bile, basilan
-        # tuslar ARTIK DOGRU ALANA ULASMIYORDU: kullanici "Set"/"kg"/"Tekrar"
-        # gibi alanlara her bastiginda klavye aciliyor ama YAZI HIC GIRILEMIYORDU.
-        #
-        # DUZELTME: kisayolu SADECE input_type ONCEKI acik klavyeyle AYNIYSA
-        # kullaniyoruz (ör. "kg" alanindan "tekrar" alanina - ikisi de "number" -
-        # gecerken flicker onleme hala calisir). input_type FARKLIYSA (ör. bir
-        # metin alanindan sayisal bir alana geciliyorsa) orijinal
-        # kapat/ac yoluna dusuyoruz - bu durumda kisa bir flicker olabilir ama
-        # klavye DOGRU sekilde yeniden kurulup yazi girisi calisir; bu, hicbir
-        # sey yazilamamasindan cok daha iyi bir durum.
-        already_open = getattr(self, "_sdl_keyboard", None) is not None
-        same_type = getattr(self, "_tonaj_kb_input_type", None) == input_type
-        if not already_open or not same_type:
-            keyboard = orig_request_keyboard(
-                self, callback, target, input_type, keyboard_suggestions)
-            self._tonaj_kb_input_type = input_type
-            return keyboard
-        # Klavye zaten acik VE ayni input_type: native kapat/ac dongusune
-        # GIRME, sadece hedefi ve callback'i guncelle. Bu cagri sirasinda
-        # WindowBase.request_keyboard kendi icinde self.release_keyboard(...)'u
-        # cagiracak - bu bizim patched_release_keyboard'a duser, o da bayrak
-        # sayesinde native hide_keyboard() cagirmadan sadece odak temizligini
-        # yapar.
-        self._tonaj_kb_switching = True
-        try:
-            keyboard = WindowBase.request_keyboard(
-                self, callback, target, input_type, keyboard_suggestions)
-        finally:
-            self._tonaj_kb_switching = False
-        self._sdl_keyboard = keyboard
-        self._tonaj_kb_input_type = input_type
-        return keyboard
-
-    def patched_release_keyboard(self, *largs):
-        if getattr(self, "_tonaj_kb_switching", False):
-            # Bu, yukaridaki odak-degistirme akisinin bir parcasi: eski alanin
-            # geri-cagrisini (odak temizligi icin) calistir ama native klavyeyi
-            # KAPATMA - hemen ardindan yeni alan icin tekrar acilacak zaten.
-            return WindowBase.release_keyboard(self, *largs)
-        # Klavye GERCEKTEN (hicbir alan odaklanmadigi icin) kapaniyor - bir
-        # sonraki request_keyboard cagrisinin "ayni tip mi" kontrolu yanlis
-        # pozitif vermesin diye kayitli input_type'i temizliyoruz.
-        self._tonaj_kb_input_type = None
-        return orig_release_keyboard(self, *largs)
-
-    WindowSDL.request_keyboard = patched_request_keyboard
-    WindowSDL.release_keyboard = patched_release_keyboard
-    WindowSDL._tonaj_kb_patched = True
-
-
 _focused_ti = [None]  # su an odakta olan (klavye acik) TextInput - yoksa None
 
 
@@ -388,11 +290,10 @@ def dark_ti(**kw):
         def scroll_into_view(*_):
             _pending_scroll_event[0] = None
             _do_scroll_into_view(instance, animate=True)
-        # NOT: Klavyeden kacinma artik Android'in kendi "below_target" pan
-        # mekanizmasina birakildi (bkz. TonajApp.build() - Window.softinput_mode).
-        # Pencere hicbir zaman native olarak yeniden boyutlanmiyor/yikilmiyor
-        # artik, o yuzden burada bir "resize animasyonu" yok. Bu kaydirma
-        # SADECE widget'i kendi ScrollView'i icinde (klavyeden bagimsiz olarak,
+        # NOT: Klavyeden kacinma Android'in adjustResize'iyle (hook.py) native
+        # olarak hallediliyor - pencere klavye kadar kucalir, Kivy bunu normal
+        # Window.size degisimiyle otomatik ele alir. Bu kaydirma SADECE
+        # widget'i kendi ScrollView'i icinde (klavyeden bagimsiz olarak,
         # ör. uzun bir listede yukarida/asagida kalmissa) gorunur yapmak icin -
         # kucuk bir gecikmeyle cagirmak, odak hizlica bir alandan digerine
         # atlarken (kg -> tekrar gibi) gereksiz ara kaydirmalari elimine ediyor.
@@ -1639,87 +1540,18 @@ class TonajApp(App):
     def build(self):
         self.title = "Tonaj"
         Window.clearcolor = BG
-        # GECMIS (ARTIK TERK EDILEN) YAKLASIM: Once "Android'in AndroidManifest'i
-        # zaten adjustResize ile pencereyi kucultuyor" varsayimiyla calisildi (bu
-        # varsayim yanlisti, p4a hicbir windowSoftInputMode eklemiyordu). Sonra
-        # hook.py ile manifest'e elle android:windowSoftInputMode="adjustResize"
-        # eklenip, pencere GERCEKTEN native olarak kucalip buyusun diye
-        # Window.size degisimini dinleyen elle bir "rescroll" mekanizmasi
-        # (_on_window_resize_rescroll) kuruldu. Bu, "klavyenin icerigi kapatmasi"
-        # sorununu cozdu AMA ekran kaydinin video kare-kare analizinde
-        # gosterdigi UZUN (birkac kare suren) SIYAH EKRAN sorununa yol acti:
-        # adjustResize her klavye acilis/kapanisinda Android'in GL yuzeyini
-        # (SurfaceView) GERCEKTEN yeniden boyutlandirmasini/yeniden olusturmasini
-        # tetikliyor, bu da bu cihazda yuzeyin bir sure hicbir sey cizmemesine
-        # (siyah/bos kalmasina) sebep oluyordu - kaydirma mantigimizdan tamamen
-        # BAGIMSIZ, cozemeyecegimiz bir native davranis.
-        #
-        # YENI COZUM: Kivy'nin SDL2/Android icin resmi olarak desteklenen kendi
-        # klavye-kacinma mekanizmasina (Window.softinput_mode = "below_target")
-        # geciyoruz. Bu mod, pencereyi HICBIR ZAMAN native olarak yeniden
-        # boyutlandirmiyor/yuzeyi yikip yeniden kurmuyor - bunun yerine odakli
-        # TextInput'un GERCEK ekran konumunu Android'e bildirip (SDL_SetTextInputRect)
-        # Android'in butun ekrani sadece o alan gorunur kalacak kadar KAYDIRMASINI
-        # (pan - yuzey yeniden olusturulmadan, sadece gorsel olarak otelenerek)
-        # sagliyor. Yuzey hic yikilmadigi icin o "siyah flash" da olusmuyor.
-        # buildozer.spec + hook.py artik manifest'e adjustResize DEGIL,
-        # adjustPan ekliyor (below_target'in dayandigi native davranis budur).
-        # Pencere boyutu artik klavye yuzunden hic degismeyecegi icin, eski
-        # "_on_window_resize_rescroll" / Window.bind(size=...) mekanizmasi
-        # tamamen kaldirildi - artik cozdugu bir sorun yok, sadece gereksiz
-        # karmasiklik olurdu. Odakli kutuyu ScrollView icinde gorunur tutma
-        # isini hala dark_ti() (yukarida, on_focus icinde) yapiyor - bu, klavye
-        # pan'inden BAGIMSIZ, salt "bu widget'i kendi ScrollView'i icinde
-        # gorunur yap" gorevi oldugu icin below_target ile CAKISMIYOR.
-        # GUNCELLEME (gercek cihazdan alinan Android "hata raporu"/logcat ile
-        # dogrulandi): below_target ile klavye acilip "Set" gibi bir alana
-        # dokunulunca (1) IME (Gboard) alani bir an "PasswordIme" moduna
-        # dusurup giris oturumunu MILISANIYELER icinde acip kapatiyor - yani
-        # klavye gorsel olarak acik kalsa da gercek metin baglantisi duzgun
-        # kurulmuyor - ve (2) uygulama arka plana alinip geri donduruldugunde
-        # Android'in kendi sistem loglarinda ActivityTaskManager: "Destroy
-        # timeout of remove-task, attempt to kill Task ... tonaj" hatasi
-        # goruluyor - yani ana thread GERCEKTEN kilitleniyor (deadlock) ve
-        # Android eski sureci ZORLA olduruyor. Bu native/JNI seviyesinde bir
-        # sorun, below_target'in below_target'e OZGU (below_target, pan'dan
-        # farkli olarak odaklanmis widget'in ekran konumunu surekli native'e
-        # bildirip senkron hesaplama yaptiriyor) davranisindan kaynaklaniyor
-        # gibi gorunuyor. below_target, Kivy'de daha yeni ve cok daha az
-        # kullanilan/test edilmis bir secenek - bu yuzden cok daha eski ve
-        # yaygin kullanilan "pan" moduna donuyoruz. Native manifest ayari
-        # (android:windowSoftInputMode="adjustPan", hook.py) ikisiyle de
-        # (pan VE below_target) calisan bir ayar oldugu icin ONCEKI "siyah
-        # flash" duzeltmesini BOZMUYOR - sadece Window.softinput_mode
-        # degeri degisiyor.
-        Window.softinput_mode = "pan"
-        # _patch_keyboard_focus_switch() KAPATILDI (COK ONEMLI - detay asagida).
-        #
-        # Bu fonksiyon Kivy'nin WindowSDL.request_keyboard/release_keyboard
-        # metodlarini native "kapat/ac" cagrilarini atlayacak sekilde
-        # degistiriyordu (asil amac: alan degistirirken kucuk bir flicker'i
-        # onlemek). Video kanitlarinda (once sayisal klavyeyle, SONRA
-        # input_type="number" TAMAMEN KALDIRILDIKTAN SONRA BILE normal tam
-        # klavyeyle) ayni sorun devam etti: klavye aciliyor ama basilan
-        # tuslar alana hic ulasmiyor, VE en son videoda uygulamanin tamamen
-        # DONMASI da eklendi. input_type kaldirilinca sorun duzelmedigi icin
-        # sorunun input_type ile degil, dogrudan bu fonksiyonun Android'in
-        # native klavye/metin-girisi ile Kivy arasindaki baglantiyi (Kivy
-        # kaynagini okurken gorulduğu uzere WindowBase.request_keyboard
-        # kendi icinde self.release_keyboard(target)'i cagirip bunun da
-        # bir onceki alanin odak/geri-cagirma zincirini tetikledigi, cok
-        # katmanli ve kirilgan bir mekanizma) BOZMASIYLA ilgili oldugu
-        # sonucuna varildi. Bu tek fonksiyon, uygulamadaki klavye
-        # request/release akisina dokunan TEK kod - bu yuzden ana supheli.
-        #
-        # COZUM: Bu monkeypatch'i TAMAMEN devre disi birakip Kivy'nin kendi
-        # (hicbir sekilde degistirilmemis, cok daha genis kullanici kitlesi
-        # tarafindan test edilmis) varsayilan request_keyboard/release_keyboard
-        # davranisina donuyoruz. Bunun bedeli, alanlar arasi gecistee eskiden
-        # cozulmeye calisilan kucuk bir gorsel "titreme" olabilir - ama bu,
-        # yazi hic girilememesinden ve uygulamanin donmasindan cok daha kucuk
-        # bir sorun. Fonksiyonun kodu asagida (_patch_keyboard_focus_switch
-        # tanimi) hala duruyor, ileride farkli/daha guvenli bir yaklasimla
-        # tekrar denenebilir, ama su an CAGRILMIYOR.
+        # Klavye/metin girisi: Kivy'nin ve Android'in kendi varsayilan
+        # davranisina birakiyoruz (Window.softinput_mode ayarlanmiyor,
+        # manifest'te android:windowSoftInputMode="adjustResize" - bkz.
+        # hook.py). Daha once "below_target"/"pan" gibi ozel modlar ve
+        # request_keyboard/release_keyboard'u degistiren bir monkeypatch
+        # denenmisti; hicbiri asil sorunu (TextInput.input_type'in Kivy'de
+        # varsayilan olarak 'text' degil 'null' olmasi - bkz. dark_ti())
+        # cozmedi, sadece gereksiz karmasiklik ekledi. adjustResize'in
+        # eskiden neden oldugu dusunulen "beyaz/siyah flash" da aslinda
+        # ayri bir sorundu (KivySupportCutout stilinde windowBackground
+        # eksikligi) ve o hook.py'da kalici olarak duzeltildi - yani
+        # adjustResize'a donmek artik guvenli.
         self.state, _ = core.load_state(get_data_path())
         self._save_pending = None
         self.root_widget = RootWidget()
