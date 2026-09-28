@@ -191,10 +191,26 @@ def styled_button(text, color=ACCENT, text_color=(0.07, 0.08, 0.06, 1), **kw):
 
 
 def label(text, size=16, color=TEXT, bold=False, halign="left", **kw):
+    # KOK NEDEN (silme onay popup'larinda ustteki satirlarin kaybolmasi /
+    # "yazilar gozukmuyor" sikayeti): text_size, hem genislik HEM YUKSEKLIK
+    # birlikte verildiginde Kivy metni O KUTUYA KIRPARAK ciziyor. Eski kod
+    # `text_size = lb.size` yapiyordu - yani text_size'in yukseklik kismini
+    # da etikettin O ANKI (henuz sarmadan once, varsayilan dp(20)) yuksekligine
+    # esitliyordu. Bu da metni DAHA ILK KAREDE dp(20)'lik bir kutuya kirpiyor,
+    # texture_size da (kirpilmis haliyle) hep ~dp(20) olarak geri donuyordu -
+    # yani "gercek" (coklu satirli) yukseklik ASLA hesaplanamiyordu ve etiket
+    # boyu hicbir zaman buyumuyordu: uzun/coklu-satir metinler (ornegin
+    # "Antrenmanı Sil" onay yazisi) kalici olarak kirpilmis/eksik gorunuyordu.
+    #
+    # DUZELTME: text_size'in yukseklik kismini HIC vermiyoruz (None birakiyoruz)
+    # - bu, Kivy'ye "metni bu genislige sar, yuksekligi metnin dogal ihtiyacina
+    # gore SINIRSIZ hesapla" der. texture_size artik metnin GERCEK (kirpilmemis)
+    # yuksekligini verir, o da asagidaki binding ile etiketin height'ina yaziliyor.
     lb = Label(text=text, font_size=sp_(size), color=color, bold=bold,
                halign=halign, valign="middle", size_hint_y=None, **kw)
-    lb.bind(size=lambda *_: setattr(lb, "text_size", lb.size))
+    lb.bind(width=lambda *_: setattr(lb, "text_size", (lb.width, None)))
     lb.bind(texture_size=lambda *_: setattr(lb, "height", max(lb.texture_size[1], dp(20))))
+    lb.text_size = (lb.width, None)
     return lb
 
 
@@ -603,7 +619,8 @@ class ProgramScreen(Screen):
 
         def field(hint, val):
             ti = dark_ti(hint_text=hint, text=str(val) if val not in (None, "") else "",
-                            multiline=False, input_filter="float", size_hint_y=None, height=dp(40))
+                            multiline=False, input_filter="float", input_type="number",
+                            size_hint_y=None, height=dp(40))
             return ti
 
         sets_i = field("Set", existing.get("targetSets"))
@@ -804,14 +821,14 @@ class ProgramScreen(Screen):
             form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
             w_hint = f"{to_display_weight(_sw):g}" if _sw else weight_unit()
-            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float")
-            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
+            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float", input_type="number")
+            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int", input_type="number")
             add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
             form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
             card.add_widget(form)
 
             extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
+            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", input_type="number", size_hint_x=0.25)
             warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_normal="", background_down="", background_color=RAISED, color=TEXT)
             extra.add_widget(rir_input)
             extra.add_widget(warm_toggle)
