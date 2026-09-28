@@ -1655,7 +1655,27 @@ class TonajApp(App):
         # isini hala dark_ti() (yukarida, on_focus icinde) yapiyor - bu, klavye
         # pan'inden BAGIMSIZ, salt "bu widget'i kendi ScrollView'i icinde
         # gorunur yap" gorevi oldugu icin below_target ile CAKISMIYOR.
-        Window.softinput_mode = "below_target"
+        # GUNCELLEME (gercek cihazdan alinan Android "hata raporu"/logcat ile
+        # dogrulandi): below_target ile klavye acilip "Set" gibi bir alana
+        # dokunulunca (1) IME (Gboard) alani bir an "PasswordIme" moduna
+        # dusurup giris oturumunu MILISANIYELER icinde acip kapatiyor - yani
+        # klavye gorsel olarak acik kalsa da gercek metin baglantisi duzgun
+        # kurulmuyor - ve (2) uygulama arka plana alinip geri donduruldugunde
+        # Android'in kendi sistem loglarinda ActivityTaskManager: "Destroy
+        # timeout of remove-task, attempt to kill Task ... tonaj" hatasi
+        # goruluyor - yani ana thread GERCEKTEN kilitleniyor (deadlock) ve
+        # Android eski sureci ZORLA olduruyor. Bu native/JNI seviyesinde bir
+        # sorun, below_target'in below_target'e OZGU (below_target, pan'dan
+        # farkli olarak odaklanmis widget'in ekran konumunu surekli native'e
+        # bildirip senkron hesaplama yaptiriyor) davranisindan kaynaklaniyor
+        # gibi gorunuyor. below_target, Kivy'de daha yeni ve cok daha az
+        # kullanilan/test edilmis bir secenek - bu yuzden cok daha eski ve
+        # yaygin kullanilan "pan" moduna donuyoruz. Native manifest ayari
+        # (android:windowSoftInputMode="adjustPan", hook.py) ikisiyle de
+        # (pan VE below_target) calisan bir ayar oldugu icin ONCEKI "siyah
+        # flash" duzeltmesini BOZMUYOR - sadece Window.softinput_mode
+        # degeri degisiyor.
+        Window.softinput_mode = "pan"
         # _patch_keyboard_focus_switch() KAPATILDI (COK ONEMLI - detay asagida).
         #
         # Bu fonksiyon Kivy'nin WindowSDL.request_keyboard/release_keyboard
