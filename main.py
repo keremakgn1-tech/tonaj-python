@@ -679,8 +679,19 @@ class ProgramScreen(Screen):
         content.add_widget(label(name, size=17, bold=True, height=dp(28)))
 
         def field(hint, val):
+            # input_type="number" GERI ALINDI: video kare-kare incelemesinde,
+            # bu formda klavyenin o oturumda ILK kez acildigi durumda bile
+            # (yani onceki "ayni acik klavyeyi degistirmeden kullanma"
+            # kisayoluyla hicbir ilgisi olmayan bir senaryoda) sayisal klavye
+            # goruluyor ama basilan tuslar ALANA HIC ULASMIYORDU. Bu, bu
+            # cihaz/Android surumunde Kivy'nin SDL2 metin-girisi koprusuyle
+            # "number" klavye tipinin duzgun calismadigi anlamina geliyor -
+            # bizim tarafimizdan (main.py icinde) duzeltilemeyecek, native
+            # bir uyumsuzluk. input_filter (sadece rakam/nokta kabul etme)
+            # zaten calisiyordu ve KALIYOR - sadece klavyenin GORUNUMU
+            # (tam klavye yerine sayisal tus takimi) eski haline donuyor.
             ti = dark_ti(hint_text=hint, text=str(val) if val not in (None, "") else "",
-                            multiline=False, input_filter="float", input_type="number",
+                            multiline=False, input_filter="float",
                             size_hint_y=None, height=dp(40))
             return ti
 
@@ -902,14 +913,17 @@ class ProgramScreen(Screen):
             form = GridLayout(cols=3, size_hint_y=None, height=dp(44), spacing=dp(6))
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
             w_hint = f"{to_display_weight(_sw):g}" if _sw else weight_unit()
-            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float", input_type="number")
-            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int", input_type="number")
+            # input_type="number" geri alindi - bkz. yukaridaki field()
+            # icindeki aciklama (sayisal klavye bu cihazda yazi girisini
+            # tamamen engelliyordu).
+            w_input = dark_ti(hint_text=w_hint, multiline=False, input_filter="float")
+            r_input = dark_ti(hint_text="tekrar", multiline=False, input_filter="int")
             add_btn = Button(text="+", background_normal="", background_down="", background_color=ACCENT, color=(0.07, 0.08, 0.06, 1), bold=True, font_size=sp_(20))
             form.add_widget(w_input); form.add_widget(r_input); form.add_widget(add_btn)
             card.add_widget(form)
 
             extra = BoxLayout(size_hint_y=None, height=dp(38), spacing=dp(6))
-            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", input_type="number", size_hint_x=0.25)
+            rir_input = dark_ti(hint_text="RIR", multiline=False, input_filter="int", size_hint_x=0.25)
             warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.5, background_normal="", background_down="", background_color=RAISED, color=TEXT)
             extra.add_widget(rir_input)
             extra.add_widget(warm_toggle)
