@@ -272,15 +272,38 @@ def _patch_keyboard_focus_switch():
 
     def patched_request_keyboard(self, callback, target, input_type='text',
                                   keyboard_suggestions=True):
+        # KOK NEDEN (video ile dogrulanan "Hedef" formunda - ve sayisal
+        # klavyeli her alanda - yazi YAZILAMAMASI hatasi): asagidaki "klavyeyi
+        # kapatip acma" kisayolu (flicker'i onlemek icin) klavye zaten acikken
+        # HER ZAMAN devreye giriyordu - input_type FARKLI olsa bile (ornegin
+        # onceki alan "text" tipindeyken yeni alan "number" istiyorsa). Bu
+        # kisayol, native Android klavyesini GERCEKTEN yeniden olusturmadigi
+        # (sadece Kivy tarafinda hedef/callback degistirdigi) icin, native
+        # taraf hala ESKI input_type'in klavyesini/baglantisini kullanmaya
+        # devam ediyordu - ekranda dogru (sayisal) klavye gorunse bile, basilan
+        # tuslar ARTIK DOGRU ALANA ULASMIYORDU: kullanici "Set"/"kg"/"Tekrar"
+        # gibi alanlara her bastiginda klavye aciliyor ama YAZI HIC GIRILEMIYORDU.
+        #
+        # DUZELTME: kisayolu SADECE input_type ONCEKI acik klavyeyle AYNIYSA
+        # kullaniyoruz (ör. "kg" alanindan "tekrar" alanina - ikisi de "number" -
+        # gecerken flicker onleme hala calisir). input_type FARKLIYSA (ör. bir
+        # metin alanindan sayisal bir alana geciliyorsa) orijinal
+        # kapat/ac yoluna dusuyoruz - bu durumda kisa bir flicker olabilir ama
+        # klavye DOGRU sekilde yeniden kurulup yazi girisi calisir; bu, hicbir
+        # sey yazilamamasindan cok daha iyi bir durum.
         already_open = getattr(self, "_sdl_keyboard", None) is not None
-        if not already_open:
-            return orig_request_keyboard(
+        same_type = getattr(self, "_tonaj_kb_input_type", None) == input_type
+        if not already_open or not same_type:
+            keyboard = orig_request_keyboard(
                 self, callback, target, input_type, keyboard_suggestions)
-        # Klavye zaten acik: native kapat/ac dongusune GIRME, sadece hedefi
-        # ve callback'i guncelle. Bu cagri sirasinda WindowBase.request_keyboard
-        # kendi icinde self.release_keyboard(...)'u cagiracak - bu bizim
-        # patched_release_keyboard'a duser, o da bayrak sayesinde native
-        # hide_keyboard() cagirmadan sadece odak temizligini yapar.
+            self._tonaj_kb_input_type = input_type
+            return keyboard
+        # Klavye zaten acik VE ayni input_type: native kapat/ac dongusune
+        # GIRME, sadece hedefi ve callback'i guncelle. Bu cagri sirasinda
+        # WindowBase.request_keyboard kendi icinde self.release_keyboard(...)'u
+        # cagiracak - bu bizim patched_release_keyboard'a duser, o da bayrak
+        # sayesinde native hide_keyboard() cagirmadan sadece odak temizligini
+        # yapar.
         self._tonaj_kb_switching = True
         try:
             keyboard = WindowBase.request_keyboard(
@@ -288,6 +311,7 @@ def _patch_keyboard_focus_switch():
         finally:
             self._tonaj_kb_switching = False
         self._sdl_keyboard = keyboard
+        self._tonaj_kb_input_type = input_type
         return keyboard
 
     def patched_release_keyboard(self, *largs):
@@ -296,6 +320,10 @@ def _patch_keyboard_focus_switch():
             # geri-cagrisini (odak temizligi icin) calistir ama native klavyeyi
             # KAPATMA - hemen ardindan yeni alan icin tekrar acilacak zaten.
             return WindowBase.release_keyboard(self, *largs)
+        # Klavye GERCEKTEN (hicbir alan odaklanmadigi icin) kapaniyor - bir
+        # sonraki request_keyboard cagrisinin "ayni tip mi" kontrolu yanlis
+        # pozitif vermesin diye kayitli input_type'i temizliyoruz.
+        self._tonaj_kb_input_type = None
         return orig_release_keyboard(self, *largs)
 
     WindowSDL.request_keyboard = patched_request_keyboard
