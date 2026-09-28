@@ -1656,7 +1656,34 @@ class TonajApp(App):
         # pan'inden BAGIMSIZ, salt "bu widget'i kendi ScrollView'i icinde
         # gorunur yap" gorevi oldugu icin below_target ile CAKISMIYOR.
         Window.softinput_mode = "below_target"
-        _patch_keyboard_focus_switch()
+        # _patch_keyboard_focus_switch() KAPATILDI (COK ONEMLI - detay asagida).
+        #
+        # Bu fonksiyon Kivy'nin WindowSDL.request_keyboard/release_keyboard
+        # metodlarini native "kapat/ac" cagrilarini atlayacak sekilde
+        # degistiriyordu (asil amac: alan degistirirken kucuk bir flicker'i
+        # onlemek). Video kanitlarinda (once sayisal klavyeyle, SONRA
+        # input_type="number" TAMAMEN KALDIRILDIKTAN SONRA BILE normal tam
+        # klavyeyle) ayni sorun devam etti: klavye aciliyor ama basilan
+        # tuslar alana hic ulasmiyor, VE en son videoda uygulamanin tamamen
+        # DONMASI da eklendi. input_type kaldirilinca sorun duzelmedigi icin
+        # sorunun input_type ile degil, dogrudan bu fonksiyonun Android'in
+        # native klavye/metin-girisi ile Kivy arasindaki baglantiyi (Kivy
+        # kaynagini okurken gorulduğu uzere WindowBase.request_keyboard
+        # kendi icinde self.release_keyboard(target)'i cagirip bunun da
+        # bir onceki alanin odak/geri-cagirma zincirini tetikledigi, cok
+        # katmanli ve kirilgan bir mekanizma) BOZMASIYLA ilgili oldugu
+        # sonucuna varildi. Bu tek fonksiyon, uygulamadaki klavye
+        # request/release akisina dokunan TEK kod - bu yuzden ana supheli.
+        #
+        # COZUM: Bu monkeypatch'i TAMAMEN devre disi birakip Kivy'nin kendi
+        # (hicbir sekilde degistirilmemis, cok daha genis kullanici kitlesi
+        # tarafindan test edilmis) varsayilan request_keyboard/release_keyboard
+        # davranisina donuyoruz. Bunun bedeli, alanlar arasi gecistee eskiden
+        # cozulmeye calisilan kucuk bir gorsel "titreme" olabilir - ama bu,
+        # yazi hic girilememesinden ve uygulamanin donmasindan cok daha kucuk
+        # bir sorun. Fonksiyonun kodu asagida (_patch_keyboard_focus_switch
+        # tanimi) hala duruyor, ileride farkli/daha guvenli bir yaklasimla
+        # tekrar denenebilir, ama su an CAGRILMIYOR.
         self.state, _ = core.load_state(get_data_path())
         self._save_pending = None
         self.root_widget = RootWidget()
