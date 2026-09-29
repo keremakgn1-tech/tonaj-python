@@ -390,6 +390,17 @@ def _find_scrollview(widget):
 
 
 class ProgramScreen(Screen):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        # Antrenmana baslamadan once programa goz atarken (ozellikle telefonu
+        # elinde tutarken/hareket halindeyken) sira degistirme/kopyalama/
+        # hareket silme gibi YIKICI butonlar HER ZAMAN acik ve tek dokunusla
+        # aninda uygulaniyordu - yanlislikla dokunmak programi bozabiliyordu.
+        # Simdi varsayilan GORUNUM salt-okunur: sadece gun/hareket/hedef bilgisi
+        # + BASLA gorunuyor. Bu duzenleme butonlari SADECE kullanici acikca
+        # "Düzenle" moduna gecince ortaya cikiyor (bkz. render_planner/day_card).
+        self.edit_mode = False
+
     def on_pre_enter(self):
         self.render()
 
@@ -421,16 +432,34 @@ class ProgramScreen(Screen):
         col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(12), padding=dp(12))
         col.bind(minimum_height=col.setter("height"))
 
+        # Duzenleme kilidi acma/kapama butonu - bkz. __init__'teki not.
+        top_row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(8))
+        top_row.add_widget(label("PROGRAM", size=14, bold=True, color=MUTED, height=dp(40)))
+        top_row.add_widget(BoxLayout())
+        edit_btn = styled_button("Bitti" if self.edit_mode else "Düzenle",
+                                  color=ACCENT if self.edit_mode else RAISED,
+                                  text_color=ACCENT_DARK if self.edit_mode else TEXT,
+                                  size_hint=(None, None), size=(dp(110), dp(36)))
+        def toggle_edit(*_):
+            self.edit_mode = not self.edit_mode
+            self.render()
+        edit_btn.bind(on_release=toggle_edit)
+        top_row.add_widget(edit_btn)
+        col.add_widget(top_row)
+
         if not state["program"]["days"]:
-            col.add_widget(label("Program tanımlı değil. Aşağıdan gün ekle.", color=MUTED, height=dp(60)))
+            msg = ("Program tanımlı değil. Düzenle moduna geçip gün ekle."
+                   if not self.edit_mode else "Program tanımlı değil. Aşağıdan gün ekle.")
+            col.add_widget(label(msg, color=MUTED, height=dp(60)))
 
         next_id = core.next_suggested_day_id(state)
         for day in state["program"]["days"]:
-            col.add_widget(self.day_card(state, day, is_next=(day["id"] == next_id)))
+            col.add_widget(self.day_card(state, day, is_next=(day["id"] == next_id), editable=self.edit_mode))
 
-        add_btn = styled_button("+ GÜN EKLE", color=RAISED, text_color=TEXT)
-        add_btn.bind(on_release=lambda *_: (core.add_program_day(state), app.save(), self.render(keep_scroll=True)))
-        col.add_widget(add_btn)
+        if self.edit_mode:
+            add_btn = styled_button("+ GÜN EKLE", color=RAISED, text_color=TEXT)
+            add_btn.bind(on_release=lambda *_: (core.add_program_day(state), app.save(), self.render(keep_scroll=True)))
+            col.add_widget(add_btn)
 
         free_btn = styled_button("Serbest Antrenman Başlat", color=RAISED, text_color=TEXT)
         free_btn.bind(on_release=lambda *_: self.start_session(None))
@@ -439,7 +468,7 @@ class ProgramScreen(Screen):
         scroll.add_widget(col)
         return scroll
 
-    def day_card(self, state, day, is_next):
+    def day_card(self, state, day, is_next, editable):
         app = App.get_running_app()
         card = Card(size_hint_y=None, spacing=dp(4))
         card.bind(minimum_height=card.setter("height"))
@@ -464,16 +493,19 @@ class ProgramScreen(Screen):
             bg_rect(sirada, ACCENT)
             eyebrow.add_widget(sirada)
         eyebrow.add_widget(BoxLayout())  # sag tarafi dolduran bosluk
-        up = Button(text="↑", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
-        down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
-        dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), dp(28)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(13))
-        delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
-        up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render(keep_scroll=True)))
-        down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render(keep_scroll=True)))
-        dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render(keep_scroll=True)))
-        delete.bind(on_release=lambda *_: self.confirm_delete_day(day["id"]))
-        for w in (up, down, dup, delete):
-            eyebrow.add_widget(w)
+        # Sirayi degistirme/kopyalama/gunu silme - YIKICI/programi degistiren
+        # butonlar, SADECE "Düzenle" modu acikken gorunur (bkz. render_planner).
+        if editable:
+            up = Button(text="↑", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
+            down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
+            dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), dp(28)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(13))
+            delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
+            up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render(keep_scroll=True)))
+            down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render(keep_scroll=True)))
+            dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render(keep_scroll=True)))
+            delete.bind(on_release=lambda *_: self.confirm_delete_day(day["id"]))
+            for w in (up, down, dup, delete):
+                eyebrow.add_widget(w)
         card.add_widget(eyebrow)
 
         head_lbl = Label(text=tr_upper(headline), font_name="Oswald", font_size=sp_(24), color=TEXT,
@@ -486,7 +518,6 @@ class ProgramScreen(Screen):
 
         for i, ex in enumerate(day["exercises"]):
             row = ClickableRow(size_hint_y=None, height=dp(40), spacing=dp(6), padding=(0, dp(2)))
-            row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
             with row.canvas.before:
                 Color(*DIVIDER)
                 rline = Line(points=[0, row.top, row.width, row.top], width=dp(1))
@@ -494,19 +525,25 @@ class ProgramScreen(Screen):
                      size=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]))
             row.add_widget(label(ex["name"], size=14.5, bold=True, color=TEXT))
             tgt = target_label(ex) or "hedef yok"
-            tgt_lbl = mono_label(tgt, size=13.5, color=MUTED, halign="right", size_hint_x=None, width=dp(150))
+            tgt_lbl = mono_label(tgt, size=13.5, color=MUTED, halign="right",
+                                  size_hint_x=None, width=dp(150) if editable else dp(174))
             row.add_widget(tgt_lbl)
-            rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
-            rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
-            row.add_widget(rm)
+            # Hedefi acip degistirme ve hareketi programdan cikarma da program
+            # YAPISINI degistiren islemler - sadece Düzenle modunda aktif.
+            if editable:
+                row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
+                rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
+                rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
+                row.add_widget(rm)
             card.add_widget(row)
 
         actions = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(16), padding=(0, dp(10), 0, 0))
-        add_ex = Button(text="+ Hareket", background_color=(0,0,0,0), color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(90))
-        add_ex.bind(on_release=lambda *_: self.open_exercise_picker(day["id"]))
+        if editable:
+            add_ex = Button(text="+ Hareket", background_color=(0,0,0,0), color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(90))
+            add_ex.bind(on_release=lambda *_: self.open_exercise_picker(day["id"]))
+            actions.add_widget(add_ex)
         deload = Button(text="Deload", background_color=(0,0,0,0), color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(70))
         deload.bind(on_release=lambda *_: self.start_session(day["id"], is_deload=True))
-        actions.add_widget(add_ex)
         actions.add_widget(deload)
         actions.add_widget(BoxLayout())
         start = Button(text="BAŞLA", font_name="Oswald", font_size=sp_(15),
@@ -669,11 +706,41 @@ class ProgramScreen(Screen):
         col.add_widget(finish)
 
         discard = styled_button("Antrenmanı Sil", color=(0.2, 0.1, 0.1, 1), text_color=DANGER)
-        discard.bind(on_release=lambda *_: (core.discard_session(state), app.save(), self.render()))
+        discard.bind(on_release=lambda *_: self.confirm_discard_session())
         col.add_widget(discard)
 
         scroll.add_widget(col)
         return scroll
+
+    def confirm_discard_session(self):
+        # KOK NEDEN (yanlislikla dokunma riski): bu buton ONCEDEN hicbir onay
+        # istemeden TEK dokunusla butun antrenmani (o ana kadar girilen tum
+        # setleri) siliyordu - antrenman sirasinda telefon elde/terlemisken
+        # en riskli buton tam olarak buydu. Artik diger tum yikici islemlerle
+        # (gunu sil, kaydi sil, verileri sifirla) AYNI onay deseni kullaniyor.
+        app = App.get_running_app()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label(
+            "Bu antrenmanı silmek istediğine emin misin? Şimdiye kadar "
+            "girdiğin tüm setler kaybolacak. Bu işlem geri alınamaz."))
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Antrenmanı Sil", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
+
+        def do_discard(*_):
+            core.discard_session(app.state)
+            app.save()
+            popup.dismiss()
+            self.render()
+
+        yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
+        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        yes.bind(on_release=do_discard)
+        no.bind(on_release=popup.dismiss)
+        row.add_widget(no); row.add_widget(yes)
+        content.add_widget(row)
+        popup.open()
 
     def add_adhoc_exercise(self):
         # open_exercise_picker()'daki AYNI donma hissi buradaki 80+ hareketlik
@@ -705,6 +772,37 @@ class ProgramScreen(Screen):
 
         Clock.schedule_once(build_list, 0)
 
+    def confirm_remove_exercise(self, sess, idx, name):
+        # KOK NEDEN (yanlislikla dokunma riski): antrenman sirasinda bir
+        # hareketi karttan cikaran "×" ONCEDEN hicbir onay istemeden TEK
+        # dokunusla o harekete o ana kadar girilmis TUM setleri de birlikte
+        # siliyordu. Antrenman sirasinda telefon elde/terlemisken bu, "Antrenmanı
+        # Sil" kadar tehlikeli bir yanlislik riskiydi - simdi ayni onay deseni
+        # burada da var.
+        app = App.get_running_app()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label(
+            f'"{name}" hareketini antrenmandan çıkarmak istediğine emin misin? '
+            "Bu harekete girdiğin setler varsa onlar da silinir."))
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Hareketi Çıkar", content=content, size_hint=(0.85, None))
+        fit_popup_to_content(popup, content)
+
+        def do_remove(*_):
+            sess["exercises"].pop(idx)
+            app.save()
+            popup.dismiss()
+            self.render(keep_scroll=True)
+
+        yes = styled_button("Evet, Çıkar", color=DANGER, text_color=(1, 1, 1, 1))
+        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        yes.bind(on_release=do_remove)
+        no.bind(on_release=popup.dismiss)
+        row.add_widget(no); row.add_widget(yes)
+        content.add_widget(row)
+        popup.open()
+
     def exercise_card(self, state, sess, ex, idx):
         # Onceden her set eklendiginde/silindiginde TUM ekran (basliktan diger
         # tum hareket kartlarina kadar) yeniden ciziliyordu - bu da her "+" ya
@@ -723,7 +821,7 @@ class ProgramScreen(Screen):
             head = BoxLayout(size_hint_y=None, height=dp(26))
             head.add_widget(label(ex["name"], size=16, bold=True))
             rm_ex = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
-            rm_ex.bind(on_release=lambda *_: (sess["exercises"].pop(idx), app.save(), self.render(keep_scroll=True)))
+            rm_ex.bind(on_release=lambda *_: self.confirm_remove_exercise(sess, idx, ex["name"]))
             head.add_widget(rm_ex)
             card.add_widget(head)
             meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {fmt_weight(prev_max).upper()}" if prev_max else "")
