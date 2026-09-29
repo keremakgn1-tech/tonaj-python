@@ -17,7 +17,7 @@ from kivy.clock import Clock
 
 import core
 from shared import (
-    DIVIDER, TEXT, MUTED, FAINT, ACCENT, DANGER, STEEL,
+    DIVIDER, TEXT, MUTED, FAINT, ACCENT, DANGER, STEEL, TRANSPARENT, ICON_BTN_SIZE,
     weight_unit, to_display_weight, fmt_weight,
     confirm_dialog, Card, label, sp_, mono_label, target_label, _find_scrollview,
 )
@@ -77,8 +77,8 @@ class HistoryScreen(Screen):
             title_col.add_widget(label(s["dayName"], size=14, color=MUTED, height=dp(18)))
         head.add_widget(title_col)
         head.add_widget(mono_label(fmt_weight(tonnage), size=15, color=ACCENT, bold=True, halign="right"))
-        del_btn = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)),
-                          background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(18))
+        del_btn = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE),
+                          background_color=TRANSPARENT, color=MUTED, font_size=sp_(18))
         del_btn.bind(on_release=lambda *_, sid=s["id"]: self.confirm_delete_session(sid))
         head.add_widget(del_btn)
         card.add_widget(head)

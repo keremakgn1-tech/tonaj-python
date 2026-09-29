@@ -28,7 +28,7 @@ from kivy.clock import Clock
 from kivy.base import ExceptionHandler, ExceptionManager
 
 import core
-from shared import BG, CARD, BORDER, MUTED, ACCENT, bg_rect, sp_, ClickableRow, toast
+from shared import BG, CARD, BORDER, MUTED, ACCENT, ACCENT_TEXT, bg_rect, sp_, ClickableRow, toast
 from screens.program import ProgramScreen
 from screens.history import HistoryScreen
 from screens.library import LibraryScreen
@@ -110,7 +110,7 @@ class RootWidget(FloatLayout):
                                   pos_hint={"center_x": 0.5, "top": 0.97},
                                   opacity=0, halign="center", valign="middle",
                                   font_name="Oswald", bold=True,
-                                  color=(0.07, 0.08, 0.06, 1))
+                                  color=ACCENT_TEXT)
         self.toast_label.bind(size=lambda *_: setattr(self.toast_label, "text_size", self.toast_label.size))
         bg_rect(self.toast_label, ACCENT, radius=dp(8))
         self.add_widget(self.toast_label)

@@ -76,6 +76,24 @@ ACCENT_DARK = (0x0C/255, 0x1A/255, 0x02/255, 1)
 DANGER = (0xFF/255, 0x5A/255, 0x5A/255, 1)
 STEEL = (0x5B/255, 0x7F/255, 0xB5/255, 1)
 
+# KOK NEDEN (Task 19 - kod incelemesinde bulundu - "tekrarlanan ham renk
+# tuple'lari"): (0, 0, 0, 0) (seffaf zemin) ve (0.07, 0.08, 0.06, 1) (ACCENT
+# zemin uzerindeki koyu metin) gibi renkler, isimli bir sabit yerine HER
+# kullanim yerinde ayri ayri ham tuple olarak yaziliyordu - bir gun bu renk
+# degismesi gerekse (orn. seffafligi hafifce degistirmek) TUM kullanim
+# yerlerini tek tek bulup degistirmek gerekirdi, biri unutulursa tutarsizlik
+# olusurdu. Isimli sabitlere tasindi.
+TRANSPARENT = (0, 0, 0, 0)
+ACCENT_TEXT = (0.07, 0.08, 0.06, 1)  # ACCENT (limon yeşili) zemin üzerindeki koyu metin rengi - styled_button() varsayılanı
+
+# KOK NEDEN (Task 19 - kod incelemesinde bulundu - "tutarsiz ikon-buton dp()
+# sihirli sayilari"): satir ici kucuk "ikon" butonlari (gun sirasi ↑/↓,
+# kopyala, sil/×...) dp(24)/dp(26)/dp(28) gibi birbirinden farkli, ozel-durum
+# boyutlarda yaziliyordu - bunlarin bir kismi onerilen ASGARI dokunma hedefi
+# (~dp(32)) ALTINDA kaliyordu, parmakla isabetli dokunmayi zorlastiriyordu.
+# Butun kare ikon butonlari bu TEK isimli sabite yakinsatildi (dp(32) minimum).
+ICON_BTN_SIZE = dp(32)
+
 
 # ---------------------------------------------------------------------------
 # Birim sistemi (kg / lb)
@@ -222,7 +240,7 @@ class Card(BoxLayout):
         self.spacing = dp(6)
 
 
-def styled_button(text, color=ACCENT, text_color=(0.07, 0.08, 0.06, 1), **kw):
+def styled_button(text, color=ACCENT, text_color=ACCENT_TEXT, **kw):
     # setdefault kullaniyoruz cunku bazi cagiranlar size_hint_y/height'i kendi
     # **kw'si icinde ayrica veriyor - dogrudan Button(size_hint_y=None,
     # height=..., **kw) yazsaydik, o zaman ayni anahtar iki kere verilmis

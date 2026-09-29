@@ -26,6 +26,7 @@ from kivy.uix.recycleboxlayout import RecycleBoxLayout
 import core
 from shared import (
     RAISED, BORDER, DIVIDER, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER, STEEL,
+    TRANSPARENT, ICON_BTN_SIZE,
     weight_unit, to_display_weight, to_storage_kg, fmt_weight,
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
@@ -136,7 +137,10 @@ class ProgramScreen(Screen):
 
         ordinal, headline, meta = parse_day_name(day["name"])
 
-        eyebrow = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(8))
+        # Yukseklik ICON_BTN_SIZE (dp32) - asagidaki up/down/delete ikon
+        # butonlari bu asgari dokunma hedefine buyutuldugu icin satir da
+        # onlara sigacak kadar yuksek olmali (Task 19).
+        eyebrow = BoxLayout(size_hint_y=None, height=ICON_BTN_SIZE, spacing=dp(8))
         if ordinal:
             eyebrow.add_widget(mono_label(ordinal, size=14, color=MUTED, width=dp(24)))
         if is_next:
@@ -148,10 +152,10 @@ class ProgramScreen(Screen):
         # Sirayi degistirme/kopyalama/gunu silme - YIKICI/programi degistiren
         # butonlar, SADECE "Düzenle" modu acikken gorunur (bkz. render_planner).
         if editable:
-            up = Button(text="↑", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
-            down = Button(text="↓", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=FAINT)
-            dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), dp(28)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(13))
-            delete = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0,0,0,0), color=DANGER)
+            up = Button(text="↑", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=FAINT)
+            down = Button(text="↓", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=FAINT)
+            dup = Button(text="Kopya", size_hint=(None, None), size=(dp(54), ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(13))
+            delete = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=DANGER)
             up.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], -1), app.save(), self.render(keep_scroll=True)))
             down.bind(on_release=lambda *_: (core.move_program_day(state, day["id"], 1), app.save(), self.render(keep_scroll=True)))
             dup.bind(on_release=lambda *_: (core.duplicate_program_day(state, day["id"]), app.save(), self.render(keep_scroll=True)))
@@ -184,17 +188,17 @@ class ProgramScreen(Screen):
             # YAPISINI degistiren islemler - sadece Düzenle modunda aktif.
             if editable:
                 row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
-                rm = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(17))
+                rm = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(17))
                 rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
                 row.add_widget(rm)
             card.add_widget(row)
 
         actions = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(16), padding=(0, dp(10), 0, 0))
         if editable:
-            add_ex = Button(text="+ Hareket", background_color=(0,0,0,0), color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(90))
+            add_ex = Button(text="+ Hareket", background_color=TRANSPARENT, color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(90))
             add_ex.bind(on_release=lambda *_: self.open_exercise_picker(day["id"]))
             actions.add_widget(add_ex)
-        deload = Button(text="Deload", background_color=(0,0,0,0), color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(70))
+        deload = Button(text="Deload", background_color=TRANSPARENT, color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(70))
         deload.bind(on_release=lambda *_: self.start_session(day["id"], is_deload=True))
         actions.add_widget(deload)
         actions.add_widget(BoxLayout())
@@ -681,7 +685,7 @@ class ProgramScreen(Screen):
             # bulgusuna karsi - Android'in onerdigi ~44-48dp'ye tam
             # ulasamasak da (satir yuksekligi/yogun liste gorunumu
             # korunarak) ONCEKI dp(26)'dan belirgin sekilde buyutuldu.
-            rm_ex = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(18))
+            rm_ex = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(18))
             rm_ex.bind(on_release=lambda *_: self.confirm_remove_exercise(sess, idx, ex["name"]))
             head.add_widget(rm_ex)
             card.add_widget(head)
@@ -711,7 +715,7 @@ class ProgramScreen(Screen):
                 if badge:
                     badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
                     row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
-                rm = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
+                rm = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(17))
                 def do_remove(*_a, j=si):
                     core.remove_set(state, idx, j)
                     app.save()
