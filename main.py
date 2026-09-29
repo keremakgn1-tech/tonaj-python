@@ -644,7 +644,15 @@ class ProgramScreen(Screen):
                 for n in matches:
                     b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="",
                                background_down="", background_color=RAISED, color=TEXT)
-                    b.bind(on_release=lambda *_, name=n: (popup.dismiss(), on_pick(name)))
+                    # animation=False: normal (animasyonlu) dismiss ~0.25sn
+                    # boyunca solarak kapanir - bu sure icinde on_pick(name)
+                    # HEMEN yeni bir popup (Hedef) actigi icin, eski (solmakta
+                    # olan) popup ile yeni popup ile arkadaki Program ekrani
+                    # ust uste/yari saydam binip goruntu kaymasina/karismasina
+                    # sebep oluyordu. Aninda (animasyonsuz) kapatarak iki
+                    # popup'in asla ayni anda ekranda yari saydam durmamasini
+                    # sagliyoruz.
+                    b.bind(on_release=lambda *_, name=n: (popup.dismiss(animation=False), on_pick(name)))
                     col.add_widget(b)
 
             search.bind(text=lambda _w, val: refresh(val))
