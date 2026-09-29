@@ -615,7 +615,16 @@ class ProgramScreen(Screen):
         loading_lbl = label("Yükleniyor…", color=MUTED, halign="center", height=dp(200))
         content.add_widget(loading_lbl)
         popup = Popup(title=title, size_hint=(0.9, 0.9), content=content)
-        popup.open()
+        # animation=False: bu popup'in acilisi ONCEDEN animasyonluydu (tek
+        # istisna - dosyadaki BASKA HICBIR popup.open() cagrisinda animasyon
+        # yok). Kullanicinin gonderdigi ekran goruntusunde (Bench Dip) eski
+        # Hedef popup'inin kalintisinin gorunmesi, tam olarak "‹ Geri" ->
+        # do_back() -> BU popup'i acan open_exercise_picker() akisinda
+        # oluyordu - do_back() onceki Hedef popup'ini animasyonsuz kapatiyor
+        # ama BU popup fade-in ile aciliyordu, o solma suresi boyunca eski
+        # icerigin kalintisi gorunebiliyordu. Diger butun popup.open()
+        # cagrilariyla tutarli olmasi icin burada da kapatiyoruz.
+        popup.open(animation=False)
 
         def build_body(*_a):
             content.clear_widgets()
@@ -820,8 +829,18 @@ class ProgramScreen(Screen):
         # olmuyor.
         if on_back is not None:
             def do_back(*_a):
+                # KOK NEDEN (kullanicinin "Bench Dip" ekran goruntusunde
+                # gorulen, eski Hedef popup'inin kalintisinin yeni popup'in
+                # arkasinda gorunmesi): "hareket sec -> Hedef" yonunu daha
+                # once duzelttik (bkz. pick() icindeki KOK NEDEN 3 notu -
+                # dismiss() ile bir sonraki popup.open() arasina bilerek bir
+                # Clock karesi koyduk) AMA "‹ Geri" ile TERS yonde (Hedef'ten
+                # cikip tekrar hareket listesini acarken) ayni duzeltmeyi
+                # UNUTMUSTUK - burada da dismiss() hemen ardindan (ayni Python
+                # cagrisinda) on_back() -> open_exercise_picker() -> yeni bir
+                # Popup aciliyordu. Ayni sekilde bir kare araya koyuyoruz.
                 popup.dismiss(animation=False)
-                on_back()
+                Clock.schedule_once(lambda *_b: on_back(), 0)
             back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
                                       size_hint=(None, None), size=(dp(84), dp(32)))
             back_btn.bind(on_release=do_back)
