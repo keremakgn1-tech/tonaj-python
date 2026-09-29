@@ -541,6 +541,52 @@ def test_muscle_group_volume_counts_working_sets_per_group():
 
 
 # ---------------------------------------------------------------------------
+# weekly_tonnage_trend (UX incelemesi - Rapor ekrani trend grafigi)
+# ---------------------------------------------------------------------------
+def test_weekly_tonnage_trend_returns_requested_number_of_weeks_oldest_first():
+    state = core.default_state()
+    now = core.now_ms()
+    trend = core.weekly_tonnage_trend(state, weeks=8, now_ms_value=now)
+    assert len(trend) == 8
+    starts = [p["weekStart"] for p in trend]
+    assert starts == sorted(starts)  # en eski -> en yeni
+    assert starts[-1] == core.period_key(now, "week")
+
+
+def test_weekly_tonnage_trend_empty_weeks_are_zero_not_missing():
+    state = core.default_state()
+    now = core.now_ms()
+    trend = core.weekly_tonnage_trend(state, weeks=4, now_ms_value=now)
+    assert all(p["tonnage"] == 0 for p in trend)
+
+
+def test_weekly_tonnage_trend_sums_sessions_into_correct_week():
+    state = core.default_state()
+    now = core.now_ms()
+    week_ms = 7 * 24 * 60 * 60 * 1000
+    cur_week_start = core.period_key(now, "week")
+    prev_week_ts = cur_week_start - week_ms + 1000  # bir onceki haftanin icinde bir an
+    state["history"] = [
+        make_history_session("Squat", [make_set(100, 5)], started_at=now),          # bu hafta: 500kg
+        make_history_session("Bench Press", [make_set(50, 10)], started_at=prev_week_ts),  # onceki hafta: 500kg
+    ]
+    trend = core.weekly_tonnage_trend(state, weeks=8, now_ms_value=now)
+    assert trend[-1]["tonnage"] == 500  # bu hafta
+    assert trend[-2]["tonnage"] == 500  # bir onceki hafta
+    assert all(p["tonnage"] == 0 for p in trend[:-2])
+
+
+def test_weekly_tonnage_trend_ignores_sessions_older_than_window():
+    state = core.default_state()
+    now = core.now_ms()
+    week_ms = 7 * 24 * 60 * 60 * 1000
+    too_old_ts = now - 20 * week_ms  # istenen pencerenin (8 hafta) cok disinda
+    state["history"] = [make_history_session("Squat", [make_set(100, 5)], started_at=too_old_ts)]
+    trend = core.weekly_tonnage_trend(state, weeks=8, now_ms_value=now)
+    assert sum(p["tonnage"] for p in trend) == 0
+
+
+# ---------------------------------------------------------------------------
 # increment_for
 # ---------------------------------------------------------------------------
 def test_increment_for_known_categories():

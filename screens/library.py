@@ -2,9 +2,18 @@
 TONAJ - Hareketler (kutuphane) ekrani (Task 18 refactor: main.py'den
 ayrildi).
 
-Uygulamanin butun hareket kutuphanesini (217+ hareket), kas grubuna gore
-gruplanmis olarak listeler. Davranis main.py'deki halinden HICBIR sekilde
-degismedi - bu SAF bir tasima (bkz. shared.py basindaki Task 18 notu).
+DUZELTME (UX incelemesi - yanlis docstring): burada ONCEDEN "uygulamanin
+butun hareket kutuphanesini (217+ hareket), kas grubuna gore gruplanmis
+olarak listeler" yaziyordu - bu, kodun GERCEKTE yaptigindan farkliydi ve
+kafa karistirici bir isim/beklenti uyusmazligina isaret ediyordu. Bu ekran
+aslinda 217'lik TUM hareket kutuphanesini degil, SADECE kullanicinin
+GECMISTE en az bir kez calistigi hareketleri (kisisel rekorlariyla birlikte)
+listeler - yani bir "Kisisel Rekorlar" ozetidir, kas grubuna gore
+gruplama da YOKTUR (duz alfabetik liste). 217 hareketlik TAM kutuphaneyi
+gormek/aramak icin kullanilan yer, program ekranindaki "+ Hareket" secici
+popup'udur (bkz. screens/program.py open_exercise_picker). Davranis
+main.py'deki halinden HICBIR sekilde degismedi, sadece bu yanlis yorum
+duzeltildi (bu SAF bir tasima - bkz. shared.py basindaki Task 18 notu).
 """
 from kivy.app import App
 from kivy.uix.screenmanager import Screen

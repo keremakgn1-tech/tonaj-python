@@ -1001,3 +1001,28 @@ def muscle_group_volume(state, period, cur_key):
             for g in state["muscleGroups"].get(ex["name"], []):
                 counts[g] = counts.get(g, 0) + working
     return sorted(counts.items(), key=lambda x: -x[1])
+
+
+def weekly_tonnage_trend(state, weeks=8, now_ms_value=None):
+    """Son `weeks` hafta icin (EN ESKI -> EN YENI sirada) haftalik toplam
+    tonaji dondurur - [{"weekStart": <ms>, "tonnage": <kg>}, ...]. Hic
+    antrenman yapilmamis haftalar da listede 0 olarak yer alir (ekranda
+    surekli/kesintisiz bir zaman ekseni gostermek icin - bos haftalar
+    grafikten kaybolursa "bu hafta hic calismadim" bilgisi de kaybolur).
+
+    KOK NEDEN (UX incelemesi - Rapor ekrani): rapor ekrani sadece TEK bir
+    haftanin (mevcut haftanin) sayilarini gosteriyordu - kullanici zaman
+    icinde ILERLIYOR mu geriliyor mu hicbir sekilde goremiyordu, her
+    ziyarette sadece "su anki" durumu gorurdu. Bu fonksiyon Rapor
+    ekranindaki basit bir cubuk grafigin veri kaynagidir.
+    """
+    now = now_ms_value if now_ms_value is not None else now_ms()
+    cur_week_start = period_key(now, "week")
+    week_ms = 7 * 24 * 60 * 60 * 1000
+    week_starts = [cur_week_start - i * week_ms for i in range(weeks - 1, -1, -1)]
+    totals = {w: 0.0 for w in week_starts}
+    for s in state["history"]:
+        wk = period_key(s["startedAt"], "week")
+        if wk in totals:
+            totals[wk] += session_tonnage(s)
+    return [{"weekStart": w, "tonnage": totals[w]} for w in week_starts]

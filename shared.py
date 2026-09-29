@@ -240,6 +240,48 @@ class Card(BoxLayout):
         self.spacing = dp(6)
 
 
+class WeeklyBarChart(BoxLayout):
+    """UX incelemesinde bulunan bosluk icin eklendi: Rapor ekrani ONCEDEN
+    sadece TEK haftanin (mevcut haftanin) sayilarini gosteriyordu - kullanici
+    zaman icinde ilerleyip ilerlemedigini HICBIR sekilde goremiyordu. Bu,
+    matplotlib gibi harici bir grafik kutuphanesine (Android derlemesine
+    ekstra bir python-for-android recipe'i eklemek gerektirir, hem boyut
+    hem kirilma riski) ihtiyac duymayan, sade bir dikey cubuk grafik -
+    sadece Kivy'nin kendi BoxLayout/canvas'iyla (bg_rect) ciziliyor.
+
+    points: [{"label": str, "value": float, "highlight": bool}, ...]
+        - "highlight": genelde en son (mevcut) hafta icin True - o cubuk
+          digerlerinden (MUTED yerine ACCENT ile) daha belirgin gorunur.
+        - value 0 olan haftalar TAMAMEN gizlenmez (cubuk yoksa "bu hafta
+          hic calismadim" bilgisi de kaybolurdu) - cok ince bir BORDER
+          renginde "sifir cizgisi" olarak gosterilir.
+    """
+    def __init__(self, points, value_fmt=None, **kw):
+        kw.setdefault("orientation", "horizontal")
+        kw.setdefault("spacing", dp(6))
+        kw.setdefault("size_hint_y", None)
+        kw.setdefault("height", dp(130))
+        super().__init__(**kw)
+        max_val = max((p["value"] for p in points), default=0) or 1
+        for p in points:
+            val = p.get("value", 0)
+            frac = max(0.0, min(1.0, val / max_val)) if max_val else 0.0
+            cell = BoxLayout(orientation="vertical", spacing=dp(4))
+            if val > 0:
+                cell.add_widget(label(value_fmt(val) if value_fmt else f"{val:g}",
+                                       size=11, color=MUTED, halign="center", height=dp(14)))
+            else:
+                cell.add_widget(BoxLayout(size_hint_y=None, height=dp(14)))
+            bar_col = BoxLayout(orientation="vertical")
+            bar_col.add_widget(BoxLayout(size_hint_y=(1 - frac) if val > 0 else 0.97))
+            bar = BoxLayout(size_hint_y=frac if val > 0 else 0.03)
+            bg_rect(bar, ACCENT if p.get("highlight") else (BORDER if val == 0 else FAINT), radius=dp(3))
+            bar_col.add_widget(bar)
+            cell.add_widget(bar_col)
+            cell.add_widget(label(p.get("label", ""), size=11, color=MUTED, halign="center", height=dp(16)))
+            self.add_widget(cell)
+
+
 def styled_button(text, color=ACCENT, text_color=ACCENT_TEXT, **kw):
     # setdefault kullaniyoruz cunku bazi cagiranlar size_hint_y/height'i kendi
     # **kw'si icinde ayrica veriyor - dogrudan Button(size_hint_y=None,

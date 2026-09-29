@@ -662,6 +662,24 @@ def step_visit_other_screens():
 safe("visit history/library/report/settings screens", step_visit_other_screens)
 
 
+def step_report_screen_shows_weekly_trend_chart():
+    # UX incelemesi (kullanicidan gelen istek): Rapor ekrani ONCEDEN sadece
+    # mevcut haftanin sayilarini gosteriyordu - core.weekly_tonnage_trend +
+    # shared.WeeklyBarChart ile eklenen "SON 8 HAFTA" grafiginin GERCEKTEN
+    # render edildigini dogrula (widget agacinda basligi ve 8 hafta-etiketi
+    # hucresini ara).
+    from shared import WeeklyBarChart
+    go("report")
+    report_screen.on_pre_enter()
+    title = find_text(report_screen, "SON 8 HAFTA - TONAJ TRENDİ", exact=True)
+    assert title is not None, "Rapor ekraninda haftalik trend grafiginin basligi bulunamadi"
+    charts = [w for w in report_screen.walk() if isinstance(w, WeeklyBarChart)]
+    assert len(charts) == 1, "Rapor ekraninda tam olarak bir WeeklyBarChart olmali"
+    assert len(charts[0].children) == 8, "grafik 8 haftalik hucre icermeli"
+
+safe("report screen shows the weekly tonnage trend chart", step_report_screen_shows_weekly_trend_chart)
+
+
 def step_hardware_back_button_returns_to_program_tab():
     # KOK NEDEN: Android'in fiziksel/gesture geri tusu ONCEDEN "program"
     # disindaki bir sekmedeyken dogrudan UYGULAMAYI KAPATIYORDU (Kivy'nin

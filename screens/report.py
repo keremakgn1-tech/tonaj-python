@@ -12,7 +12,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.metrics import dp
 
 import core
-from shared import MUTED, ACCENT, DANGER, weight_unit, to_display_weight, Card, label, mono_label
+from shared import MUTED, ACCENT, DANGER, weight_unit, to_display_weight, Card, label, mono_label, WeeklyBarChart
 
 
 class ReportScreen(Screen):
@@ -46,6 +46,28 @@ class ReportScreen(Screen):
         stats.add_widget(stat_cell(str(count), "antrenman"))
         stats.add_widget(stat_cell(str(len(prs)), "yeni rekor"))
         col.add_widget(stats)
+
+        # KOK NEDEN (UX incelemesi): bu ekran ONCEDEN SADECE mevcut haftanin
+        # sayilarini gosteriyordu - kullanici "geceyim mi ilerliyor muyum"
+        # sorusuna hicbir zaman cevap bulamiyordu, her ziyarette ayni "su an"
+        # anlik goruntusunu goruyordu. Asagidaki basit cubuk grafik son 8
+        # haftalik tonaj trendini (bkz. core.weekly_tonnage_trend) gosterir -
+        # calisilmayan haftalar da (0 olarak, ince bir cizgiyle) goruluyor ki
+        # "bos gecen" bir hafta grafikten sessizce kaybolmasin.
+        from datetime import datetime as _dt
+        trend = core.weekly_tonnage_trend(state, weeks=8)
+        col.add_widget(label("SON 8 HAFTA - TONAJ TRENDİ", size=14, color=MUTED, bold=True, height=dp(26)))
+        chart_card = Card()
+        points = []
+        for i, p in enumerate(trend):
+            wk_dt = _dt.fromtimestamp(p["weekStart"] / 1000)
+            points.append({
+                "label": wk_dt.strftime("%d.%m"),
+                "value": to_display_weight(p["tonnage"]),
+                "highlight": i == len(trend) - 1,
+            })
+        chart_card.add_widget(WeeklyBarChart(points, value_fmt=lambda v: f"{v:g}"))
+        col.add_widget(chart_card)
 
         vol = core.muscle_group_volume(state, "week", cur_key)
         if vol:
