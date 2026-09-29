@@ -523,18 +523,121 @@ def default_state():
     }
 
 
+def validate_state_schema(data):
+    """Bir state dict'inin (diskten okunan ya da ice aktarilan bir yedek)
+    ic yapisinin calisir durumdaki koda uygun olup olmadigini kontrol eder.
+    Uygun degilse aciklayici bir ValueError firlatir, uygunsa sessizce doner.
+
+    KOK NEDEN (kod incelemesinde bulundu - "ice aktarilan yedek yuzeysel
+    dogrulaniyor"): import_backup() ONCEDEN sadece 4 ust-seviye anahtarin
+    ("history", "program", "library", "activeSession") VAR OLUP OLMADIGINA
+    bakiyordu - ic yapiyi (orn. her set'te weight/reps alanlarinin sayisal
+    olmasi) hic dogrulamiyordu. Bozuk/elle duzenlenmis bir yedek dosyasi
+    boylece "gecerli" kabul edilip app.state'e atanabiliyor, sonrasinda
+    session_tonnage/suggested_weight_for gibi fonksiyonlar KeyError/TypeError
+    ile ANLASILMAZ bir sekilde cokebiliyordu (kullaniciya "bu yedek bozuk"
+    yerine alakasiz bir hata/cokme gorunuyordu).
+
+    Bu fonksiyon "paranoyak bir sema motoru" degil - amac, en azindan asagi
+    akista cokmeye yol acacak en kritik tip hatalarini (liste yerine obje,
+    sayi yerine string vb.) BURADA, net bir Turkce mesajla yakalamak.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(f"beklenen bir obje (dict), gelen: {type(data).__name__}")
+
+    required = ("history", "program", "library", "activeSession")
+    missing = [k for k in required if k not in data]
+    if missing:
+        raise ValueError(f"eksik alan: {', '.join(missing)}")
+
+    if not isinstance(data["history"], list):
+        raise ValueError("'history' bir liste olmalı")
+    if not isinstance(data["program"], dict) or not isinstance(data["program"].get("days"), list):
+        raise ValueError("'program.days' bir liste olmalı")
+    if not isinstance(data["library"], list):
+        raise ValueError("'library' bir liste olmalı")
+    if data["activeSession"] is not None and not isinstance(data["activeSession"], dict):
+        raise ValueError("'activeSession' null ya da obje olmalı")
+
+    def check_sets(sets, where):
+        if not isinstance(sets, list):
+            raise ValueError(f"{where}: 'sets' bir liste olmalı")
+        for s in sets:
+            if not isinstance(s, dict):
+                raise ValueError(f"{where}: her set bir obje olmalı")
+            for field in ("weight", "reps"):
+                v = s.get(field)
+                if v is not None and not isinstance(v, (int, float)):
+                    raise ValueError(f"{where}: set '{field}' değeri sayısal olmalı")
+
+    def check_exercises(exercises, where):
+        if not isinstance(exercises, list):
+            raise ValueError(f"{where}: 'exercises' bir liste olmalı")
+        for ex in exercises:
+            if not isinstance(ex, dict):
+                raise ValueError(f"{where}: her hareket bir obje olmalı")
+            check_sets(ex.get("sets", []), f"{where}/{ex.get('name', '?')}")
+
+    for i, sess in enumerate(data["history"]):
+        if not isinstance(sess, dict):
+            raise ValueError(f"history[{i}]: bir obje olmalı")
+        check_exercises(sess.get("exercises", []), f"history[{i}]")
+
+    if data["activeSession"] is not None:
+        check_exercises(data["activeSession"].get("exercises", []), "activeSession")
+
+
 # ---------------------------------------------------------------------------
 # Kalici depolama (JSON dosyasi)
 # ---------------------------------------------------------------------------
 def load_state(path):
+    # DONUS DEGERI: (state, is_new, recovered_from_corruption)
+    #
+    # KOK NEDEN (kod incelemesinde bulundu - "bozuk JSON'a karsi korumasiz"):
+    # ONCEDEN json.load(f) ve state.update(data) burada hicbir try/except
+    # OLMADAN cagriliyordu. Dosya herhangi bir sebeple (disk hatasi, yarida
+    # kesilen bir yazma, kullanicinin dosyayi elle bozmasi, depolama
+    # bozulmasi) gecersiz/bozuk JSON icerirse ya da JSON gecerli ama bir
+    # dict DEGILSE (orn. bos dosya, liste, sayi), uygulama HER ACILISTA
+    # ayni istisnayla cokuyordu - kullanicinin kurtarma yolu yoktu (yedek
+    # olsa bile uygulamaya hic giremedigi icin ice aktaramiyordu).
+    #
+    # DUZELTME: okuma/parse etme HER TURLU hatasini yakaliyoruz. Bozuk
+    # dosyayi SILMIYORUZ (kullanici sonradan elle kurtarmayi deneyebilir) -
+    # yaninda ".corrupt-<unix-zaman>" uzantili bir kopyaya tasiyip
+    # sifirdan bos bir state ile devam ediyoruz. Cagiran taraf (main.py)
+    # recovered_from_corruption=True dondugunde kullaniciya "onceki veri
+    # okunamadi" bilgisini gosterebilsin diye bunu ayri bir bayrakla
+    # bildiriyoruz.
     if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        state = default_state()
-        state.update(data)
-        if "muscleGroups" not in state or not state["muscleGroups"]:
-            state["muscleGroups"] = data.get("muscleGroups", {})
-        return state, False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"beklenen dict, gelen: {type(data).__name__}")
+            state = default_state()
+            state.update(data)
+            if "muscleGroups" not in state or not state["muscleGroups"]:
+                state["muscleGroups"] = data.get("muscleGroups", {})
+            # MERGE edilmis state'i dogruluyoruz (raw data'yi degil) - eski
+            # bir kayit dosyasinda henuz olmayan bir anahtar default_state()
+            # tarafindan zaten dolduruldugu icin bu, eski ama GECERLI
+            # dosyalari reddetmez; sadece MEVCUT alanlardaki tip hatalarini
+            # (liste yerine obje, sayi yerine string vb.) yakalar.
+            validate_state_schema(state)
+            return state, False, False
+        except (OSError, ValueError, TypeError) as e:
+            try:
+                corrupt_path = f"{path}.corrupt-{int(time.time())}"
+                os.replace(path, corrupt_path)
+            except OSError:
+                corrupt_path = "(tasinamadi)"
+            print(f"[tonaj] UYARI: {path} okunamadi ({e!r}), bozuk kopya "
+                  f"{corrupt_path} olarak birakildi, sifirdan basliyoruz.")
+            state = default_state()
+            state["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
+            save_state(path, state)
+            return state, True, True
     # KULLANICI ISTEGI: yeni kurulumda ornek/varsayilan 3 gunluk program hic
     # OLUSTURULMASIN - program bos baslasin, gunleri kullanici kendi ekleyecek.
     # (Eskiden burada build_seed_program() cagrilip ornek bir program
@@ -543,7 +646,7 @@ def load_state(path):
     state = default_state()
     state["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
     save_state(path, state)
-    return state, True
+    return state, True, False
 
 
 def save_state(path, state):

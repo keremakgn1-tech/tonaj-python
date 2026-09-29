@@ -15,6 +15,21 @@ jobs:
       - name: Depoyu al
         uses: actions/checkout@v4
 
+      - name: Python bagimliliklarini kur (pytest)
+        run: pip install --break-system-packages pytest
+
+      - name: core.py testlerini calistir
+        # KOK NEDEN (kod incelemesinde bulundu - "hic otomatik test yok"):
+        # is mantigindaki (core.py) bir regresyon ONCEDEN sadece elle
+        # (telefonda) fark edilebiliyordu - CI, Android APK'yi derleyip
+        # derleyemedigine bakiyordu ama derlenen APK'nin DOGRU calisip
+        # calismadigina hic bakmiyordu. tests/test_core.py artik en
+        # riskli alanlari (kayit/okuma, onerilen agirlik/PR mantigi,
+        # gecmis karsilastirma) kapsiyor - burada BASARISIZ olursa,
+        # 5-15 dakika suren Android derlemesine hic girmeden erken ve
+        # ucretsiz sekilde durup haber veriyoruz.
+        run: python3 -m pytest tests/ -v
+
       - name: Build stamp'i main.py'ye gom
         # KOK NEDEN: main.py'deki APP_VERSION hicbir zaman degismiyordu -
         # art arda derlenen COK FARKLI APK'lar bile telefonda hep ayni
@@ -35,10 +50,53 @@ jobs:
           sed -i "s/__BUILD_STAMP__/${STAMP}/" main.py
           grep '^BUILD_STAMP' main.py
 
+      - name: Android imzalama anahtarini (debug keystore) cache'den al
+        # KOK NEDEN (kod incelemesinde bulundu - KRITIK - "CI'da her build'de
+        # farkli bir imzalama anahtari uretiliyor"): bu is akisi HER
+        # calismada SIFIRDAN bir konteynerde basliyordu ve ~/.android
+        # (Android'in debug imzalama anahtarinin varsayilan konumu) HICBIR
+        # YERDE kalici degildi. python-for-android/Gradle, bu dosyayi
+        # bulamayinca YENI, RASTGELE bir anahtar cifti ile otomatik olarak
+        # olusturuyor - yani HER APK FARKLI BIR IMZAYLA imzalaniyordu.
+        # Android, farkli imzayla imzalanmis bir APK'yi mevcut kurulumun
+        # UZERINE GUNCELLEME olarak kabul ETMEZ - kullanici her yeni build'i
+        # kurmadan once ONCE ESKI UYGULAMAYI SILMEK zorunda kaliyordu, bu da
+        # o cihazdaki tonaj_state.json'u (bulut/sunucu YOK, tek kopya bu)
+        # KAYBETMESI anlamina geliyordu.
+        #
+        # DUZELTME: ~/.android dizinini (docker imajinda /home/user/.android)
+        # runlar arasinda actions/cache ile SABIT bir anahtarla ("v1")
+        # sakliyoruz - ilk calismada olusturulan debug.keystore, SONRAKI
+        # HER calismada ayni haliyle geri yukleniyor. Boylece butun build'ler
+        # AYNI imzayla imzalaniyor, kullanici APK'yi normal bir "guncelleme"
+        # olarak kurabiliyor - verisi korunuyor.
+        uses: actions/cache@v4
+        with:
+          path: .ci-cache/android-home
+          key: android-debug-keystore-v1
+
+      - name: Buildozer/python-for-android indirmelerini cache'le
+        # KOK NEDEN (kod incelemesinde bulundu - "CI'da hic cache kullanilmiyor"):
+        # .buildozer dizini Android SDK/NDK ve python-for-android'in indirdigi
+        # butun bagimliliklari (yuzlerce MB) barindirir - bu ONCEDEN her
+        # calismada sifirdan indiriliyordu, build'leri gereksiz yere uzatiyordu.
+        # buildozer.spec degismedigi surece (requirements/android ayarlari
+        # ayni kaldigi surece) bu indirmeler runlar arasinda AYNI - cache'den
+        # geri yuklemek build suresini onemli olcude kisaltir.
+        uses: actions/cache@v4
+        with:
+          path: .buildozer
+          key: buildozer-${{ hashFiles('buildozer.spec') }}
+          restore-keys: |
+            buildozer-
+
       - name: Buildozer'in resmi Docker imajiyla APK derle
         run: |
+          mkdir -p .ci-cache/android-home
+          chmod 777 .ci-cache/android-home  # konteyner icindeki kullanicinin yazabilmesi icin
           docker run --rm \
             -v "${{ github.workspace }}:/home/user/hostcwd" \
+            -v "${{ github.workspace }}/.ci-cache/android-home:/home/user/.android" \
             ghcr.io/kivy/buildozer:latest android debug
 
       - name: Uretilen APK dosyasinin yolunu bul

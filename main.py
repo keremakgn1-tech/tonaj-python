@@ -183,6 +183,53 @@ def fit_popup_to_content(popup, content, extra=None, min_height=None, max_height
     update()
 
 
+def confirm_dialog(title, message, on_confirm, confirm_text="Evet, Sil"):
+    """Yikici (geri alinamaz ya da riskli) bir islem oncesi standart
+    "Evet/Vazgeç" onay popup'i.
+
+    KOK NEDEN (kod incelemesinde bulundu - "6 adet neredeyse birebir kopya
+    onay diyaloğu"): confirm_delete_day, confirm_discard_session,
+    confirm_remove_exercise, confirm_delete_session, confirm_reset_all,
+    confirm_import_backup fonksiyonlarinin HER BIRI ayni ~15 satirlik
+    popup/buton iskeletini (content olustur, "Evet"/"Vazgeç" butonlari,
+    fit_popup_to_content, popup.open) kendi icinde ayri ayri kopyalayip
+    sadece baslik/mesaj/yapilacak-islemi degistiriyordu - bir davranis
+    degisikligi (orn. buton rengi, animasyon ayari) gerektiginde 6 yerde
+    ayri ayri yapilmak zorundaydi, biri unutulursa tutarsizlik olusurdu
+    (nitekim "Vazgeç" butonlari animasyonsuz degildi, digerleri
+    animasyonsuzdu - bkz. asagidaki animation=False notu).
+
+    DUZELTME: ortak iskelet TEK bir yerde - on_confirm SADECE gercek islemi
+    (state degisikligi + save + render) yapar, popup'i kapatmak bu
+    fonksiyonun sorumlulugundadir.
+    """
+    content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+    content.bind(minimum_height=content.setter("height"))
+    content.add_widget(label(message))
+    row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+    popup = Popup(title=title, content=content, size_hint=(0.85, None))
+    fit_popup_to_content(popup, content)
+
+    def do_confirm(*_a):
+        # animation=False: dosyadaki diger popup dismiss/open cagrilariyla
+        # tutarli olmasi icin (bkz. _build_exercise_picker/open_target_editor
+        # icindeki KOK NEDEN notlari - kayma hatasinin asil sebebi buydu).
+        popup.dismiss(animation=False)
+        on_confirm()
+
+    def do_cancel(*_a):
+        popup.dismiss(animation=False)
+
+    yes = styled_button(confirm_text, color=DANGER, text_color=(1, 1, 1, 1))
+    no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+    yes.bind(on_release=do_confirm)
+    no.bind(on_release=do_cancel)
+    row.add_widget(no); row.add_widget(yes)
+    content.add_widget(row)
+    popup.open(animation=False)
+    return popup
+
+
 class Card(BoxLayout):
     def __init__(self, **kw):
         kw.setdefault("orientation", "vertical")
@@ -545,7 +592,7 @@ class ProgramScreen(Screen):
             # YAPISINI degistiren islemler - sadece Düzenle modunda aktif.
             if editable:
                 row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
-                rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(16))
+                rm = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0,0,0,0), color=MUTED, font_size=sp_(17))
                 rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
                 row.add_widget(rm)
             card.add_widget(row)
@@ -569,19 +616,13 @@ class ProgramScreen(Screen):
 
     def confirm_delete_day(self, day_id):
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label("Bu günü silmek istediğine emin misin?"))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Günü Sil", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
-        yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=lambda *_: (core.delete_program_day(app.state, day_id), app.save(), popup.dismiss(), self.render(keep_scroll=True)))
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+
+        def on_confirm():
+            core.delete_program_day(app.state, day_id)
+            app.save()
+            self.render(keep_scroll=True)
+
+        confirm_dialog("Günü Sil", "Bu günü silmek istediğine emin misin?", on_confirm)
 
     def _build_exercise_picker(self, title, on_pick):
         # KOK NEDEN ("Hareket Ekle"ye basinca donma hissi): bu fonksiyon
@@ -941,28 +982,17 @@ class ProgramScreen(Screen):
         # en riskli buton tam olarak buydu. Artik diger tum yikici islemlerle
         # (gunu sil, kaydi sil, verileri sifirla) AYNI onay deseni kullaniyor.
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label(
-            "Bu antrenmanı silmek istediğine emin misin? Şimdiye kadar "
-            "girdiğin tüm setler kaybolacak. Bu işlem geri alınamaz."))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Antrenmanı Sil", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
 
-        def do_discard(*_):
+        def on_confirm():
             core.discard_session(app.state)
             app.save()
-            popup.dismiss()
             self.render()
 
-        yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=do_discard)
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+        confirm_dialog(
+            "Antrenmanı Sil",
+            "Bu antrenmanı silmek istediğine emin misin? Şimdiye kadar "
+            "girdiğin tüm setler kaybolacak. Bu işlem geri alınamaz.",
+            on_confirm)
 
     def add_adhoc_exercise(self):
         # _build_exercise_picker()'daki AYNI donma hissi buradaki hareket
@@ -985,28 +1015,17 @@ class ProgramScreen(Screen):
         # Sil" kadar tehlikeli bir yanlislik riskiydi - simdi ayni onay deseni
         # burada da var.
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label(
-            f'"{name}" hareketini antrenmandan çıkarmak istediğine emin misin? '
-            "Bu harekete girdiğin setler varsa onlar da silinir."))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Hareketi Çıkar", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
 
-        def do_remove(*_):
+        def on_confirm():
             sess["exercises"].pop(idx)
             app.save()
-            popup.dismiss()
             self.render(keep_scroll=True)
 
-        yes = styled_button("Evet, Çıkar", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=do_remove)
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+        confirm_dialog(
+            "Hareketi Çıkar",
+            f'"{name}" hareketini antrenmandan çıkarmak istediğine emin misin? '
+            "Bu harekete girdiğin setler varsa onlar da silinir.",
+            on_confirm, confirm_text="Evet, Çıkar")
 
     def exercise_card(self, state, sess, ex, idx):
         # Onceden her set eklendiginde/silindiginde TUM ekran (basliktan diger
@@ -1023,9 +1042,13 @@ class ProgramScreen(Screen):
             card.clear_widgets()
             working = [s for s in ex["sets"] if not s.get("isWarmup")]
             prev_max = core.max_weight_for(state, ex["name"])
-            head = BoxLayout(size_hint_y=None, height=dp(26))
+            head = BoxLayout(size_hint_y=None, height=dp(32))
             head.add_widget(label(ex["name"], size=16, bold=True))
-            rm_ex = Button(text="×", size_hint=(None, None), size=(dp(26), dp(26)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
+            # dp(32): kod incelemesinde bulunan "dokunma hedefi cok kucuk"
+            # bulgusuna karsi - Android'in onerdigi ~44-48dp'ye tam
+            # ulasamasak da (satir yuksekligi/yogun liste gorunumu
+            # korunarak) ONCEKI dp(26)'dan belirgin sekilde buyutuldu.
+            rm_ex = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(18))
             rm_ex.bind(on_release=lambda *_: self.confirm_remove_exercise(sess, idx, ex["name"]))
             head.add_widget(rm_ex)
             card.add_widget(head)
@@ -1046,7 +1069,7 @@ class ProgramScreen(Screen):
                 card.add_widget(sug_row)
 
             for si, s in enumerate(ex["sets"]):
-                row = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(6))
+                row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
                 flag = "ISI" if s.get("isWarmup") else str(si + 1)
                 row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
                 row.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
@@ -1055,7 +1078,7 @@ class ProgramScreen(Screen):
                 if badge:
                     badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
                     row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
-                rm = Button(text="×", size_hint=(None, None), size=(dp(24), dp(24)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(16))
+                rm = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)), background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(17))
                 def do_remove(*_a, j=si):
                     core.remove_set(state, idx, j)
                     app.save()
@@ -1152,26 +1175,16 @@ class HistoryScreen(Screen):
 
     def confirm_delete_session(self, session_id):
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label("Bu antrenman kaydını kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz."))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Antrenmanı Sil", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
 
-        def do_delete(*_):
+        def on_confirm():
             core.remove_history_session(app.state, session_id)
             app.save()
-            popup.dismiss()
             self.render(keep_scroll=True)
 
-        yes = styled_button("Evet, Sil", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=do_delete)
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+        confirm_dialog(
+            "Antrenmanı Sil",
+            "Bu antrenman kaydını kalıcı olarak silmek istediğine emin misin? Bu işlem geri alınamaz.",
+            on_confirm)
 
     def session_card(self, state, s):
         from datetime import datetime
@@ -1179,14 +1192,14 @@ class HistoryScreen(Screen):
         card.bind(minimum_height=card.setter("height"))
         dt = datetime.fromtimestamp(s["startedAt"] / 1000)
         tonnage = core.session_tonnage(s)
-        head = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(8))
+        head = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(8))
         title_col = BoxLayout(orientation="vertical")
         title_col.add_widget(label(dt.strftime("%d.%m.%Y"), size=15, bold=True, height=dp(18)))
         if s.get("dayName"):
             title_col.add_widget(label(s["dayName"], size=14, color=MUTED, height=dp(18)))
         head.add_widget(title_col)
         head.add_widget(mono_label(fmt_weight(tonnage), size=15, color=ACCENT, bold=True, halign="right"))
-        del_btn = Button(text="×", size_hint=(None, None), size=(dp(28), dp(28)),
+        del_btn = Button(text="×", size_hint=(None, None), size=(dp(32), dp(32)),
                           background_color=(0, 0, 0, 0), color=MUTED, font_size=sp_(18))
         del_btn.bind(on_release=lambda *_, sid=s["id"]: self.confirm_delete_session(sid))
         head.add_widget(del_btn)
@@ -1433,30 +1446,19 @@ class SettingsScreen(Screen):
 
     def confirm_reset_all(self):
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label(
-            "TÜM programın, antrenman geçmişin ve ayarların KALICI olarak "
-            "silinecek. Bu işlem GERİ ALINAMAZ. Devam etmeden önce yedek "
-            "almanı öneririz.", color=TEXT))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Tüm Verileri Sıfırla", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
 
-        def do_reset(*_):
+        def on_confirm():
             app.state = core.default_state()
             app.save()
-            popup.dismiss()
             self.render()
             toast(app, "Tüm veriler sıfırlandı")
 
-        yes = styled_button("Evet, Sıfırla", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=do_reset)
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+        confirm_dialog(
+            "Tüm Verileri Sıfırla",
+            "TÜM programın, antrenman geçmişin ve ayarların KALICI olarak "
+            "silinecek. Bu işlem GERİ ALINAMAZ. Devam etmeden önce yedek "
+            "almanı öneririz.",
+            on_confirm, confirm_text="Evet, Sıfırla")
 
     # ------------------------------------------------------------------
     # DISA AKTAR (export) - Android'in "Storage Access Framework" (SAF)
@@ -1543,27 +1545,12 @@ class SettingsScreen(Screen):
     # YERINE koyar. Yikici bir islem oldugu icin once onay istiyoruz.
     # ------------------------------------------------------------------
     def confirm_import_backup(self):
-        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
-        content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label(
+        confirm_dialog(
+            "Yedekten Geri Yükle",
             "Bir yedek dosyası seçeceksin. Seçtiğin dosyadaki veri, bu "
             "cihazdaki TÜM mevcut programın/geçmişin/kayıtların YERİNE "
-            "geçecek. Bu işlem geri alınamaz. Devam edilsin mi?"))
-        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Yedekten Geri Yükle", content=content, size_hint=(0.85, None))
-        fit_popup_to_content(popup, content)
-
-        def go(*_):
-            popup.dismiss()
-            self.import_backup()
-
-        yes = styled_button("Devam Et", color=DANGER, text_color=(1, 1, 1, 1))
-        no = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
-        yes.bind(on_release=go)
-        no.bind(on_release=popup.dismiss)
-        row.add_widget(no); row.add_widget(yes)
-        content.add_widget(row)
-        popup.open()
+            "geçecek. Bu işlem geri alınamaz. Devam edilsin mi?",
+            self.import_backup, confirm_text="Devam Et")
 
     def import_backup(self):
         app = App.get_running_app()
@@ -1615,10 +1602,19 @@ class SettingsScreen(Screen):
                     buffered.close()
 
                     new_state = json.loads(raw.decode("utf-8"))
-                    missing = [k for k in ("history", "program", "library", "activeSession")
-                               if k not in new_state]
-                    if missing:
-                        raise ValueError(f"Geçersiz yedek dosyası (eksik alan: {', '.join(missing)})")
+                    # KOK NEDEN (kod incelemesinde bulundu - "ice aktarilan
+                    # yedegin ic yapisi dogrulanmiyor"): burada ONCEDEN
+                    # SADECE 4 ust-seviye anahtarin VAR OLUP OLMADIGINA
+                    # bakiliyordu - ic yapi (orn. her set'teki weight/reps
+                    # alanlarinin sayisal olmasi) hic kontrol edilmiyordu.
+                    # Bozuk/elle duzenlenmis bir yedek boylece "gecerli"
+                    # kabul edilip app.state'e atanabiliyor, SONRA
+                    # session_tonnage gibi fonksiyonlarda anlasilmaz bir
+                    # cokmeye yol aciyordu. core.validate_state_schema artik
+                    # bunu daha kapsamli kontrol edip aciklayici bir
+                    # ValueError firlatiyor (asagidaki except tarafindan
+                    # yakalanip kullaniciya Turkce gosteriliyor).
+                    core.validate_state_schema(new_state)
 
                     new_state.setdefault("settings", {})
                     new_state["settings"]["lastBackupAt"] = new_state["settings"].get("lastBackupAt")
@@ -1677,6 +1673,30 @@ class RootWidget(FloatLayout):
         bg_rect(self.toast_label, ACCENT, radius=dp(8))
         self.add_widget(self.toast_label)
 
+        # KOK NEDEN (kod incelemesinde bulundu - "donanim geri tusu hic ele
+        # alinmamis"): Android'in fiziksel/gesture geri tusu ONCEDEN hicbir
+        # yerde yakalanmiyordu - Kivy'nin varsayilan davranisi, acik bir
+        # Popup YOKSA geri tusunu dogrudan UYGULAMAYI KAPATMAK icin kullanir.
+        # Yani kullanici Gecmis/Hareketler/Rapor/Ayarlar sekmelerinden
+        # herhangi birindeyken (ozellikle aktif bir antrenman surerken) yanlis
+        # bir geri tusuna basmasi uygulamayi beklenmedik sekilde kapatiyordu.
+        # (Acik bir Popup varken bu sorun yok - Kivy'nin kendi ModalView'i
+        # escape/geri tusunu zaten yakalayip SADECE popup'i kapatiyor, buraya
+        # hic ulasmiyor.)
+        #
+        # DUZELTME: "program" DISINDA bir sekmedeyken geri tusuna basilinca
+        # once "program" sekmesine donuyoruz (tuketiliyor, uygulama KAPANMIYOR);
+        # kullanici zaten "program" sekmesindeyken basarsa bu davranisi
+        # degistirmiyoruz - Android'in standart "uygulamadan cik" davranisi
+        # oradan calismaya devam ediyor.
+        Window.bind(on_keyboard=self._on_keyboard)
+
+    def _on_keyboard(self, window, key, *args):
+        if key == 27:  # Android geri tusu / masaustunde Esc
+            if self.sm.current != "program":
+                self.sm.current = "program"
+                return True  # tuketildi - uygulamadan CIKILMASIN
+        return False
 
     NAV_ITEMS = [("program", "PROGRAM"), ("history", "GEÇMİŞ"), ("library", "HAREKETLER"),
                  ("report", "RAPOR"), ("settings", "AYARLAR")]
@@ -1781,9 +1801,19 @@ class TonajApp(App):
         # da klavye acilis/kapanisini yonetmeye hic gerek kalmadi; manifest'te
         # android:windowSoftInputMode="adjustResize" (bkz. hook.py) sadece
         # Android'in standart/varsayilan davranisi olarak duruyor.
-        self.state, _ = core.load_state(get_data_path())
+        self.state, _is_new, recovered_from_corruption = core.load_state(get_data_path())
         self._save_pending = None
         self.root_widget = RootWidget()
+        if recovered_from_corruption:
+            # KOK NEDEN: kayit dosyasi okunamadi (bkz. core.load_state
+            # icindeki not) - sifirdan bos bir state ile basladik. Bunu
+            # kullaniciya SESSIZCE yapmak yerine, en azindan neden butun
+            # programinin/gecmisinin bos gorundugunu anlayabilsin diye
+            # bir toast gosteriyoruz. root_widget henuz ekrana tam
+            # yerlesmeden show_toast cagirmak sorunlu olabilecegi icin
+            # bir kare erteliyoruz.
+            Clock.schedule_once(
+                lambda *_: toast(self, "Önceki veri okunamadı, sıfırdan başlandı"), 0)
         return self.root_widget
 
     def save(self):
@@ -1820,9 +1850,24 @@ class TonajApp(App):
             # guvenilir) yola geri don - veri kaybetmemek daha onemli.
             core.save_state(path, self.state)
             return
-        threading.Thread(
-            target=_write_json_string_to_file, args=(path, payload), daemon=True
-        ).start()
+        # KOK NEDEN (kod incelemesinde bulundu - "arka plan yazma thread'i
+        # hatasiz"): _write_json_string_to_file bu thread icinde HERHANGI
+        # bir hata (disk dolu, izin hatasi, depolama kesintisi) firlatirsa,
+        # bu ONCEDEN sessizce (sadece stderr'e giden bir traceback ile)
+        # yutuluyordu - kullanici en son yaptigi degisikligin (yeni set,
+        # kaydedilen hedef vb.) diske YAZILMADIGINI hic fark edemiyordu.
+        # DUZELTME: yazmayi try/except ile sariyoruz; basarisiz olursa ana
+        # thread'e donup (Clock.schedule_once thread-safe'tir) kullaniciya
+        # aciklayici bir toast gosteriyoruz.
+        def write_and_report():
+            try:
+                _write_json_string_to_file(path, payload)
+            except Exception as e:
+                print(f"[tonaj] UYARI: diske yazma basarisiz: {e!r}")
+                Clock.schedule_once(
+                    lambda *_: toast(self, "Kaydetme başarısız oldu — tekrar dene"), 0)
+
+        threading.Thread(target=write_and_report, daemon=True).start()
 
     def on_stop(self):
         # Uygulama kapanirken bekleyen bir kayit varsa kaybetmeden hemen

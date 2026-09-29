@@ -4,3 +4,5 @@ tonaj_state.json
 .buildozer/
 bin/
 *.apk
+.ci-cache/
+.pytest_cache/
