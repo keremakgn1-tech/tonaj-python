@@ -26,6 +26,7 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.popup import Popup
 from kivy.uix.togglebutton import ToggleButton
+from kivy.uix.textinput import TextInput
 from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
@@ -570,48 +571,95 @@ class ProgramScreen(Screen):
         content.add_widget(row)
         popup.open()
 
-    def open_exercise_picker(self, day_id):
+    def _build_exercise_picker(self, title, on_pick):
         # KOK NEDEN ("Hareket Ekle"ye basinca donma hissi): bu fonksiyon
         # ONCEDEN, TEK bir dokunma/on_release cagrisinin icinde, kutuphanedeki
-        # TUM hareketler icin (80'den fazla) tek tek Button widget'i olusturup
-        # her birinin metnini SENKRON olarak font'tan dokup dokusuna (texture)
-        # ceviriyordu - bu iş bu (guclu, yazilim GPU'lu) sunucuda hizli olsa
-        # da GERCEK bir telefonda (ozellikle ilk acilista, font glyph onbellegi
-        # bosken) fark edilir bir sure surebilir. O sure boyunca ekrana HICBIR
-        # SEY cizilmiyordu (popup'in kendisi de dahil) - kullaniciya "dokunma
-        # algilanmadi, uygulama dondu" hissi veren tam olarak buydu.
+        # TUM hareketler icin (80'den fazla, simdi 217) tek tek Button widget'i
+        # olusturup her birinin metnini SENKRON olarak font'tan dokup dokusuna
+        # (texture) ceviriyordu - bu iş bu (guclu, yazilim GPU'lu) sunucuda
+        # hizli olsa da GERCEK bir telefonda (ozellikle ilk acilista, font
+        # glyph onbellegi bosken) fark edilir bir sure surebilir. O sure
+        # boyunca ekrana HICBIR SEY cizilmiyordu (popup'in kendisi de dahil) -
+        # kullaniciya "dokunma algilanmadi, uygulama dondu" hissi veren tam
+        # olarak buydu.
         #
         # DUZELTME: Once popup'i (baslik + bos/"Yükleniyor" govde ile) HEMEN
         # aciyoruz - bu, dokunmanin algilandigini ANINDA gosteriyor. Asil agir
-        # is (80+ butonun olusturulmasi) bir sonraki Clock karesine
+        # is (217 butonun olusturulmasi) bir sonraki Clock karesine
         # devrediliyor - boylece popup'in kendi acilis cizimi ekrana yansidiktan
         # SONRA buton listesi kuruluyor, "donma" hissi ortadan kalkiyor
         # (toplam sure ayni ama kullanici artik bir tepki GORUYOR).
+        #
+        # NOT (klavye): Hareket kutuphanesi 217 hareme cikinca elle arama
+        # pratik hale geldi. Bu TextInput, uygulamada bilincli olarak geri
+        # getirilen TEK klavye kullanan yer - kalan her yerde (Set/Tekrar/
+        # Agirlik/RIR/Dinlenme vb.) hala +/- stepper var, klavye hic acilmiyor.
+        # Eger bu arama kutusu eskisi gibi donmaya sebep olursa, geri almak
+        # kolay: sadece bu fonksiyonu (ve search TextInput'i) eski, arama
+        # kutusu olmayan haline dondurmek yeterli - baska hicbir ekran
+        # etkilenmiyor.
         app = App.get_running_app()
         content = BoxLayout(orientation="vertical", spacing=dp(6), padding=dp(10))
         loading_lbl = label("Yükleniyor…", color=MUTED, halign="center", height=dp(200))
         content.add_widget(loading_lbl)
-        popup = Popup(title="Hareket Seç", size_hint=(0.9, 0.8), content=content)
+        popup = Popup(title=title, size_hint=(0.9, 0.9), content=content)
         popup.open()
 
-        def build_list(*_a):
-            names = core.all_exercise_names(app.state)
+        def build_body(*_a):
             content.clear_widgets()
+
+            header = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
+            back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
+                                      size_hint=(None, None), size=(dp(84), dp(44)))
+            back_btn.bind(on_release=lambda *_: popup.dismiss(animation=False))
+            header.add_widget(back_btn)
+
+            search = TextInput(
+                hint_text="Hareket ara…", multiline=False,
+                size_hint_y=None, height=dp(44),
+                background_color=RAISED, foreground_color=TEXT, hint_text_color=MUTED,
+                cursor_color=ACCENT, padding=[dp(10), dp(11), dp(10), dp(10)],
+                font_name="Oswald", font_size=sp_(14),
+            )
+            header.add_widget(search)
+            content.add_widget(header)
+
+            names_sorted = sorted(core.all_exercise_names(app.state))
+
             scroll = ScrollView()
             col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
             col.bind(minimum_height=col.setter("height"))
-            for n in names:
-                b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
-                b.bind(on_release=lambda *_, name=n: (popup.dismiss(), self.open_target_editor({"id": day_id}, name)))
-                col.add_widget(b)
             scroll.add_widget(col)
             content.add_widget(scroll)
-            # NOT: serbest metinle "yeni hareket adi" ekleme kaldirildi -
-            # klavye acan tek yer buydu. Kutuphanede zaten onceden tanimli
-            # genis bir hareket listesi var (bkz. core.DEFAULT_EXERCISES),
-            # secim bu listeden yapiliyor.
 
-        Clock.schedule_once(build_list, 0)
+            empty_lbl = label("Sonuç bulunamadı.", color=MUTED, halign="center", height=dp(60))
+
+            def refresh(query):
+                col.clear_widgets()
+                q = query.strip().lower()
+                matches = [n for n in names_sorted if q in n.lower()] if q else names_sorted
+                if not matches:
+                    col.add_widget(empty_lbl)
+                    return
+                for n in matches:
+                    b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="",
+                               background_down="", background_color=RAISED, color=TEXT)
+                    b.bind(on_release=lambda *_, name=n: (popup.dismiss(), on_pick(name)))
+                    col.add_widget(b)
+
+            search.bind(text=lambda _w, val: refresh(val))
+            refresh("")
+            # NOT: serbest metinle "yeni hareket adi" ekleme HALA yok -
+            # arama sadece kutuphanedeki 217 onceden tanimli hareketi
+            # filtreliyor, olmayan bir ismi yazip "ekle" diye bir yol yok.
+
+        Clock.schedule_once(build_body, 0)
+        return popup
+
+    def open_exercise_picker(self, day_id):
+        def on_pick(name):
+            self.open_target_editor({"id": day_id}, name)
+        self._build_exercise_picker("Hareket Seç", on_pick)
 
     def open_target_editor(self, day, name):
         # Bu popup'taki alanlar (Set/Tekrar min/Tekrar max/Agirlik/RIR/
@@ -743,34 +791,17 @@ class ProgramScreen(Screen):
         popup.open()
 
     def add_adhoc_exercise(self):
-        # open_exercise_picker()'daki AYNI donma hissi buradaki 80+ hareketlik
-        # listede de vardi - AYNI cozum (once popup'i bos ac, buton listesini
-        # bir Clock karesi sonra kur) burada da uygulaniyor. Detay icin
-        # open_exercise_picker()'in basindaki yorum bloguna bak.
+        # _build_exercise_picker()'daki AYNI donma hissi buradaki hareket
+        # listesinde de vardi - AYNI ortak yardimci burada da kullaniliyor.
+        # Detay icin _build_exercise_picker()'in basindaki yorum bloguna bak.
         app = App.get_running_app()
-        content = BoxLayout(orientation="vertical", padding=dp(10))
-        loading_lbl = label("Yükleniyor…", color=MUTED, halign="center", height=dp(200))
-        content.add_widget(loading_lbl)
-        popup = Popup(title="Hareket Ekle", content=content, size_hint=(0.9, 0.8))
-        popup.open()
 
-        def build_list(*_a):
-            names = core.all_exercise_names(app.state)
-            content.clear_widgets()
-            scroll = ScrollView()
-            col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
-            col.bind(minimum_height=col.setter("height"))
-            for n in names:
-                b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="", background_down="", background_color=RAISED, color=TEXT)
-                def pick(*_, name=n):
-                    core.add_exercise_to_session(app.state, name)
-                    app.save(); popup.dismiss(); self.render()
-                b.bind(on_release=pick)
-                col.add_widget(b)
-            scroll.add_widget(col)
-            content.add_widget(scroll)
+        def on_pick(name):
+            core.add_exercise_to_session(app.state, name)
+            app.save()
+            self.render()
 
-        Clock.schedule_once(build_list, 0)
+        self._build_exercise_picker("Hareket Ekle", on_pick)
 
     def confirm_remove_exercise(self, sess, idx, name):
         # KOK NEDEN (yanlislikla dokunma riski): antrenman sirasinda bir
