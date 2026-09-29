@@ -662,6 +662,114 @@ def step_visit_other_screens():
 safe("visit history/library/report/settings screens", step_visit_other_screens)
 
 
+def step_history_screen_uses_recycleview_and_shows_all_sessions():
+    # UX incelemesi (kullanicidan gelen istek - "Gecmis ekrani hic
+    # sayfalanmiyor/virtualize edilmiyor"): bkz. shared._HistorySessionRow
+    # ve history_card_height() - burada GERCEKTEN bir RecycleView
+    # kullanildigini, BIRDEN FAZLA oturumun (farkli hareket sayilariyla,
+    # yani farkli yukseklikte) dogru sekilde temsil edildigini ve silme
+    # akisinin (confirm popup -> onayla -> state'ten cikar) hala eskisi
+    # gibi calistigini dogruluyoruz.
+    from kivy.uix.recycleview import RecycleView
+    from shared import history_card_height
+
+    app.state["history"] = [
+        {"id": "h1", "startedAt": 1000, "dayId": None, "dayName": "Test Günü A",
+         "isDeload": False, "note": "",
+         "exercises": [{"name": "Squat", "sets": [{"weight": 100, "reps": 5, "isWarmup": False}]}]},
+        {"id": "h2", "startedAt": 2000, "dayId": None, "dayName": "Test Günü B",
+         "isDeload": False, "note": "",
+         "exercises": [
+             {"name": "Bench Press", "sets": [{"weight": 60, "reps": 8, "isWarmup": False}]},
+             {"name": "Row", "sets": [{"weight": 50, "reps": 10, "isWarmup": False}]},
+         ]},
+    ]
+    go("history")
+    history_screen.on_pre_enter()
+
+    # NOT (bkz. _find_picker_rv/tap_picker_row'daki AYNI desen yukarida):
+    # RecycleView SADECE o an EKRANDA GORUNEN satirlar icin gercek widget
+    # kurar - kucuk/tam boyutu belli olmayan bir headless test penceresinde
+    # bir satirin GERCEKTEN realize edilip edilmedigine guvenmek yerine,
+    # dogrudan rv.data uzerinden (asil veri kaynagi) dogruluyoruz.
+    rvs = [w for w in history_screen.walk() if isinstance(w, RecycleView)]
+    assert len(rvs) == 1, "Gecmis ekraninda tam olarak bir RecycleView olmali"
+    rv = rvs[0]
+    assert len(rv.data) == 2, "rv.data iki oturumu da icermeli"
+    assert rv.data[0]["height"] == history_card_height(1), "1 hareketli oturumun yuksekligi yanlis hesaplandi"
+    assert rv.data[1]["height"] == history_card_height(2), "2 hareketli oturumun yuksekligi yanlis hesaplandi"
+    assert rv.data[0]["session"]["exercises"][0]["name"] == "Squat"
+    assert rv.data[1]["session"]["exercises"][0]["name"] == "Bench Press"
+
+    # NOT (bu dosyadaki _find_picker_rv/tap_picker_row'daki AYNI notu -
+    # yukarida): RecycleView, bu headless/gercek dokunma-kaydirma olayi
+    # olmayan test ortaminda GERCEK satir widget'lari hic instantiate
+    # ETMEYEBILIR (kaydirma alani hesabi gercek bir touch/scroll event'ine
+    # bagli) - bu, bu test ortaminin bir sinirlamasi, KODUN kendisinde bir
+    # hata degil (gercek cihazda/CI'nin xvfb'sinde dogrulandigi gibi bu
+    # zaten calisan bir desendir, bkz. Task 17). O yuzden burada da (picker
+    # testlerindeki gibi) GERCEK widget aramak yerine rv.data uzerinden
+    # dogruluyoruz - render'in KENDISI degil, render'in DOGRU VERIYLE
+    # besledigi veri kaynagi test ediliyor.
+
+    # Silme akisi: "on_delete" geri cagirimini dogrudan cagiriyoruz - bu,
+    # gercek bir Button.dispatch('on_release') ile AYNI kod yolu
+    # (shared._HistorySessionRow._build_content'teki del_btn.bind ile
+    # BIREBIR ayni callback).
+    rv.data[0]["on_delete"]()
+    popup = top_popup("Antrenmanı Sil")
+    assert popup is not None, "silme onay popup'i acilmadi"
+    evet_btn = find_text(popup, "EVET, SİL", exact=False)
+    assert evet_btn is not None, "onay popup'inda 'Evet, Sil' butonu bulunamadi"
+    click(evet_btn)
+    assert len(app.state["history"]) == 1, "onaylaninca tam olarak bir oturum silinmeli"
+    assert app.state["history"][0]["id"] == "h2", "yanlis oturum silinmis (h1 silinmeliydi)"
+
+safe("history screen uses RecycleView and shows all sessions correctly",
+     step_history_screen_uses_recycleview_and_shows_all_sessions)
+
+
+def step_library_search_filters_exercises():
+    # UX incelemesi (kullanicidan gelen istek - "Hareketler ekraninda
+    # arama/filtre yok"): arama kutusuna yazinca listenin GERCEKTEN
+    # filtrelendigini, bos sonuc mesajinin gorundugunu ve metni silince
+    # tam listenin geri geldigini dogrula.
+    from kivy.uix.textinput import TextInput
+
+    app.state["history"] = [
+        {"id": "lib1", "startedAt": 1000, "dayId": None, "dayName": None,
+         "isDeload": False, "note": "",
+         "exercises": [{"name": "Overhead Press", "sets": [{"weight": 40, "reps": 6, "isWarmup": False}]}]},
+        {"id": "lib2", "startedAt": 2000, "dayId": None, "dayName": None,
+         "isDeload": False, "note": "",
+         "exercises": [{"name": "Deadlift", "sets": [{"weight": 140, "reps": 3, "isWarmup": False}]}]},
+    ]
+    go("library")
+    library_screen.on_pre_enter()
+
+    search_boxes = [w for w in library_screen.walk() if isinstance(w, TextInput)]
+    assert len(search_boxes) == 1, "Hareketler ekraninda tam olarak bir arama kutusu olmali"
+    box = search_boxes[0]
+
+    assert find_text(library_screen, "Overhead Press", exact=False) is not None
+    assert find_text(library_screen, "Deadlift", exact=False) is not None
+
+    box.text = "dead"
+    assert find_text(library_screen, "Deadlift", exact=False) is not None
+    assert find_text(library_screen, "Overhead Press", exact=False) is None, \
+        "arama filtrelemeli - eslesmeyen hareket kaybolmali"
+
+    box.text = "eslesmeyen-bir-sey-xyz"
+    assert find_text(library_screen, "Aramanla eşleşen hareket yok.", exact=True) is not None, \
+        "bos sonuc mesaji gorunmuyor"
+
+    box.text = ""
+    assert find_text(library_screen, "Overhead Press", exact=False) is not None
+    assert find_text(library_screen, "Deadlift", exact=False) is not None
+
+safe("library screen search box filters exercise list", step_library_search_filters_exercises)
+
+
 def step_report_screen_shows_weekly_trend_chart():
     # UX incelemesi (kullanicidan gelen istek): Rapor ekrani ONCEDEN sadece
     # mevcut haftanin sayilarini gosteriyordu - core.weekly_tonnage_trend +

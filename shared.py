@@ -53,11 +53,14 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.popup import Popup
-from kivy.graphics import Color, RoundedRectangle
+from kivy.uix.textinput import TextInput
+from kivy.graphics import Color, RoundedRectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.recycleview.views import RecycleDataViewBehavior
 from kivy.metrics import dp
 from kivy.clock import Clock
+
+import core
 
 # ---------------------------------------------------------------------------
 # Renk paleti (mevcut web uygulamasiyla ayni: koyu + limon yesili vurgu)
@@ -450,6 +453,31 @@ class ClickableRow(ButtonBehavior, BoxLayout):
     pass
 
 
+def exercise_search_input(hint="Hareket ara…"):
+    """Hareket adiyla arama/filtreleme icin TEK, paylasilan TextInput
+    fabrikasi.
+
+    KOK NEDEN (UX incelemesi - kullanicidan gelen istek, "Hareketler
+    ekraninda arama yok"): uygulamada BILINCLI olarak sadece TEK bir
+    yerde (hareket secici popup'i, screens/program.py) klavye/TextInput
+    kullanilmasina izin verilmisti - digger her yerde (Set/Tekrar/Agirlik/
+    RIR/Dinlenme...) hala +/- stepper var (bkz. make_stepper() notundaki
+    "sifir klavye" kurali). Hareketler ekranina da bir arama kutusu
+    eklemek YENI bir keyfi klavye yuzeyi acmak degil - AYNI amaca (hareket
+    adiyla arama) hizmet eden, GORUNUMU/DAVRANISI BIREBIR AYNI olan TEK
+    bir bilesenin ikinci bir baglamda TEKRAR KULLANILMASI, o yuzden bu
+    fabrika fonksiyonu her iki yerde de (picker + Hareketler ekrani)
+    cagrilir - iki ayri ozel-durum TextInput yerine TEK, ortak bir tanim.
+    """
+    return TextInput(
+        hint_text=hint, multiline=False,
+        size_hint_y=None, height=dp(44),
+        background_color=RAISED, foreground_color=TEXT, hint_text_color=MUTED,
+        cursor_color=ACCENT, padding=[dp(10), dp(11), dp(10), dp(10)],
+        font_name="Oswald", font_size=sp_(14),
+    )
+
+
 class _PickerRow(RecycleDataViewBehavior, Button):
     """Hareket secici (screens/program.py: _build_exercise_picker, Task 17)
     icin RecycleView satir gorunumu.
@@ -490,6 +518,124 @@ class _PickerRow(RecycleDataViewBehavior, Button):
     def on_release(self):
         if self._pick_cb is not None:
             self._pick_cb()
+
+
+def history_card_height(n_exercises):
+    """_HistorySessionRow'un yuksekligini, RecycleView satiri GERCEKTEN
+    kurulmadan ONCE hesaplar - RecycleView, kaydirma sinirlarini dogru
+    belirleyebilmek icin her satirin yuksekligini widget'lar kurulmadan
+    ONCE (rv.data icindeki "height" anahtarindan) bilmek zorunda (bkz.
+    _HistorySessionRow'daki KOK NEDEN notu). Bu ARITMETIK hesap guvenilir,
+    cunku asagidaki sabitler _HistorySessionRow'un GERCEKTEN kurdugu
+    padding/spacing/satir-yuksekligi degerleriyle BIREBIR AYNI (ikisi
+    birbirine kenetli - biri degisirse digeri de guncellenmeli)."""
+    pad = dp(12) * 2   # Card-benzeri dikey padding (ust + alt)
+    head_h = dp(34)    # tarih/tonaj baslik satiri
+    row_h = dp(48)     # her hareket satiri (sabit yukseklik, metne gore BUYUMEZ)
+    spacing = dp(6)    # Card-benzeri cocuklar-arasi bosluk
+    return pad + head_h + n_exercises * (row_h + spacing)
+
+
+class _HistorySessionRow(RecycleDataViewBehavior, BoxLayout):
+    """Gecmis ekrani (screens/history.py) icin RecycleView satir gorunumu.
+
+    KOK NEDEN (UX incelemesi - kullanicidan gelen istek, "Gecmis ekrani hic
+    sayfalanmiyor/virtualize edilmiyor"): HistoryScreen.render() ONCEDEN
+    state["history"]'deki HER antrenman icin (aylarca kullanildikca
+    yuzlercesi birikebilir) tam bir kart widget'i (baslik + HER hareket
+    satiri + karsilastirma alt satirlari) kuruyordu - ekranda o an gorunen
+    sadece bir avucu olsa bile HEPSI ayni anda bellekte/widget agacinda
+    duruyordu. Hareket secici popup'inda (Task 17, bkz. _PickerRow)
+    uygulanan AYNI RecycleView deseni burada da uygulandi: SINIRLI sayida
+    (yalnizca EKRANDA GORUNEN + kucuk bir tampon) bu sinifin ornegi
+    olusturulup kaydirma sirasinda YENIDEN KULLANILIR.
+
+    _PickerRow'dan FARKI: oradaki satirlarin hepsi AYNI (tek satirlik,
+    sabit yukseklikte) iken buradaki her kart FARKLI sayida hareket
+    icerebilir - yani yuksekligi DEGISKEN. Bu yuzden HistoryScreen.render()
+    her oturum icin history_card_height(n) ile yuksekligi ONCEDEN
+    (widget hic kurulmadan) hesaplayip rv.data'daki ilgili girdiye
+    "height"/"size_hint_y" olarak koyuyor.
+
+    Icerik/davranis (tarih, tonaj, hareket satirlari, hedef karsilastirmasi,
+    silme onayi) HistoryScreen.session_card()'in ONCEKI halinden BIREBIR
+    AYNI - sadece bir Card dondüren bir metod yerine, RecycleView'in
+    yeniden kullanabildigi bir widget SINIFI oldu.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.orientation = "vertical"
+        self.padding = dp(12)
+        self.spacing = dp(6)
+        bg_rect(self, CARD)
+        self._on_delete_cb = None
+
+    def refresh_view_attrs(self, rv, index, data):
+        self.clear_widgets()
+        self._on_delete_cb = data.get("on_delete")
+        self._build_content(data["session"])
+        return super().refresh_view_attrs(rv, index, {})
+
+    def _build_content(self, s):
+        from datetime import datetime
+        dt = datetime.fromtimestamp(s["startedAt"] / 1000)
+        tonnage = core.session_tonnage(s)
+        head = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(8))
+        title_col = BoxLayout(orientation="vertical")
+        title_col.add_widget(label(dt.strftime("%d.%m.%Y"), size=15, bold=True, height=dp(18)))
+        if s.get("dayName"):
+            title_col.add_widget(label(s["dayName"], size=14, color=MUTED, height=dp(18)))
+        head.add_widget(title_col)
+        head.add_widget(mono_label(fmt_weight(tonnage), size=15, color=ACCENT, bold=True, halign="right"))
+        del_btn = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE),
+                          background_color=TRANSPARENT, color=MUTED, font_size=sp_(18))
+        del_btn.bind(on_release=lambda *_: self._on_delete_cb() if self._on_delete_cb else None)
+        head.add_widget(del_btn)
+        self.add_widget(head)
+
+        # Once set girilmis hareketler, sonra "SET GIRILMEDI" olanlar - boylece
+        # goz once tamamlanani tarar, bos olanlar listenin sonuna cekilir.
+        def sort_key(ex):
+            done = any(not st.get("isWarmup") for st in ex["sets"])
+            return (0 if done else 1)
+        sorted_exercises = sorted(s["exercises"], key=sort_key)
+
+        for i, ex in enumerate(sorted_exercises):
+            cmp = core.history_exercise_compare(ex)
+            is_empty = cmp["delta"][0] == "none"
+            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(48), spacing=dp(3),
+                             padding=(0, dp(6), 0, dp(6)))
+            if i > 0:
+                with row.canvas.before:
+                    Color(*DIVIDER)
+                    rline = Line(points=[0, row.top, row.width, row.top], width=dp(1))
+                row.bind(pos=lambda w, *_, ln=rline: setattr(ln, 'points', [w.x, w.top, w.right, w.top]),
+                         size=lambda w, *_, ln=rline: setattr(ln, 'points', [w.x, w.top, w.right, w.top]))
+            name_color = FAINT if is_empty else TEXT
+            top = BoxLayout(size_hint_y=None, height=dp(20), spacing=dp(6))
+            top.add_widget(label(ex["name"], size=14, color=name_color, bold=not is_empty))
+            actual = "  ".join(f"{to_display_weight(st['weight']):g}×{st['reps']}" for st in ex["sets"]) or "—"
+            top.add_widget(mono_label(actual, size=14, color=(FAINT if is_empty else TEXT), halign="right"))
+            row.add_widget(top)
+            if cmp["hasTarget"]:
+                dtxt = cmp["delta"][1] or ""
+                if cmp.get("weightDiffKg") is not None and not dtxt:
+                    d = to_display_weight(cmp["weightDiffKg"])
+                    arrow = "▲ +" if d > 0 else "▼ "
+                    dtxt = f"{arrow}{d:g} {weight_unit().upper()}"
+                color = {"up": ACCENT, "down": DANGER, "eq": STEEL, "none": FAINT}.get(cmp["delta"][0], FAINT)
+                sets_badge = cmp.get("setsBadge")
+                if sets_badge and sets_badge[2] == "under":
+                    incomplete_txt = f"{sets_badge[0]}/{sets_badge[1]} SET"
+                    dtxt = f"{incomplete_txt} · {dtxt}" if dtxt else incomplete_txt
+                    color = DANGER
+                sub_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(6))
+                sub_row.add_widget(mono_label("hedef " + target_label(ex), size=13, color=FAINT))
+                if dtxt:
+                    sub_row.add_widget(mono_label(dtxt, size=13, color=color, halign="right", bold=True))
+                row.add_widget(sub_row)
+            self.add_widget(row)
 
 
 _DAY_NAME_RE = re.compile(r'^\s*(\d+)\s*\.\s*G[üu]n\s*:\s*(.+?)\s*(?:\(([^)]*)\))?\s*$', re.IGNORECASE)

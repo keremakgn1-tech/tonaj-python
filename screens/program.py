@@ -16,7 +16,6 @@ from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.popup import Popup
 from kivy.uix.togglebutton import ToggleButton
-from kivy.uix.textinput import TextInput
 from kivy.graphics import Color, Rectangle, Line
 from kivy.metrics import dp
 from kivy.clock import Clock
@@ -30,7 +29,7 @@ from shared import (
     weight_unit, to_display_weight, to_storage_kg, fmt_weight,
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
-    toast, target_label, _find_scrollview,
+    toast, target_label, _find_scrollview, exercise_search_input,
 )
 
 
@@ -280,13 +279,11 @@ class ProgramScreen(Screen):
             # Bu listeyi hicbir sey secmeden kapatmak icin popup'in disina
             # dokunmak yeterli (Popup varsayilani auto_dismiss=True).
             header = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-            search = TextInput(
-                hint_text="Hareket ara…", multiline=False,
-                size_hint_y=None, height=dp(44),
-                background_color=RAISED, foreground_color=TEXT, hint_text_color=MUTED,
-                cursor_color=ACCENT, padding=[dp(10), dp(11), dp(10), dp(10)],
-                font_name="Oswald", font_size=sp_(14),
-            )
+            # UX incelemesi (Task: Hareketler ekranina da arama eklendi) -
+            # bu TextInput artik shared.exercise_search_input() FABRIKASI
+            # uzerinden kuruluyor (bkz. o fonksiyondaki KOK NEDEN notu) -
+            # gorunum/davranis BIREBIR AYNI kaldi, sadece tanim tekilleşti.
+            search = exercise_search_input()
             header.add_widget(search)
             content.add_widget(header)
 
