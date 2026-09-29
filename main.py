@@ -693,6 +693,27 @@ class ProgramScreen(Screen):
                         # anda aciliyoruz. Resize event hic gelmezse (bazi
                         # cihaz/durumlarda olabilir) 1.5sn'lik bir guvenlik
                         # agi var, sonsuza kadar beklemeyelim diye.
+                        # KOK NEDEN 3 (kullanici bildirimiyle bulundu - "her
+                        # cihazda, her zaman SADECE bu ekranda" - yani rastgele
+                        # bir GPU/zamanlama sorunu DEGIL, deterministik bir
+                        # sıralama hatasi): Bu picker popup'ini dismiss()
+                        # ettikten HEMEN sonra, AYNI Python cagrisi icinde
+                        # (hicbir Kivy karesi/cizimi araya girmeden) Hedef
+                        # popup'ini acmak (on_pick -> open_target_editor ->
+                        # yeni Popup + fit_popup_to_content + popup.open),
+                        # Kivy'e "once eskisini tamamen kaldir, SONRA
+                        # yenisini ciz" diyecek bir kare sinirini hic
+                        # yasatmiyordu. Sonuc: eskisinin canvas/arka plan
+                        # kalintisi, yenisinin arkasinda/icinde gorunebiliyordu
+                        # - btun cihazlarda ayni sekilde, cunku bu bir donanim
+                        # rastgeleligi degil, kod sirasi meselesi. Aralarina
+                        # Clock.schedule_once(..., 0) ile TAM BIR KARE
+                        # sinirini bilerek sokuyoruz: dismiss() bir sonraki
+                        # karede tamamen islensin, Hedef popup'i ONDAN
+                        # SONRAKI karede acilsin.
+                        def open_next(*_c, _name=name):
+                            on_pick(_name)
+
                         had_focus = search.focus
                         search.focus = False
                         popup.dismiss(animation=False)
@@ -700,8 +721,10 @@ class ProgramScreen(Screen):
                         if not had_focus or Window.height >= full_window_height - dp(2):
                             # Klavye hic acilmadiysa (dogrudan listeden secim)
                             # VEYA pencere zaten tam yuksekligindeyse (klavye
-                            # zaten kapanmis) hicbir gecikme yok - aninda ac.
-                            on_pick(name)
+                            # zaten kapanmis) ekstra bekleme yok - ama yine de
+                            # bir kare sinirini (yukaridaki not) bilerek
+                            # birakiyoruz.
+                            Clock.schedule_once(open_next, 0)
                             return
 
                         state = {"done": False}
@@ -711,7 +734,7 @@ class ProgramScreen(Screen):
                                 return
                             state["done"] = True
                             Window.unbind(on_resize=on_resize_cb)
-                            on_pick(name)
+                            Clock.schedule_once(open_next, 0)
 
                         def on_resize_cb(*_b):
                             if Window.height >= full_window_height - dp(2):
