@@ -669,10 +669,28 @@ def step_toast_queue_does_not_overwrite_pending_messages():
     assert root.toast_label.text == "Birinci mesaj", \
         "ikinci mesaj gelince ekrandaki BIRINCI mesaj degismemeli"
 
-    root._advance_toast_queue()  # birincinin suresi doldu
-    Clock.tick()
-    time.sleep(0.31)
-    Clock.tick()
+    # KOK NEDEN (bu testte gozlemlenen flaky basarisizlik): _advance_toast_queue
+    # bir sonraki toast'i Clock.schedule_once(self._show_next_toast, 0.3) ile
+    # 0.3s SONRA gostermek uzere zamanliyor - test bunu once sabit bir sure
+    # (0.31s, sonra 0.5s) uyuyup Clock.tick() cagirarak "simule" etmeye
+    # calisiyordu. Ama Kivy'nin Clock'u dt'yi GERCEK duvar saatine gore, EN
+    # SON tick() cagrisindan bu yana gecen sureyle hesapliyor - bu smoke
+    # testinin GERISINDE, bu adimdan cok once, baska adimlarda (orn.
+    # time.sleep(1.6) kullanan toast-suresi testi) Clock.tick() cagrilmadan
+    # gecen gercek sureler BIRIKIYOR. Sonuc: bu adimdaki ILK Clock.tick()
+    # cagrisi bazen (ortamin hizina/yukune bagli olarak degisken sekilde)
+    # tek basina hem 0.3s'lik hem de "bir sonraki" 1.6s'lik zamanlanmis geri
+    # cagirmayi ayni anda ateşleyebiliyordu - kuyruk beklenenden erken
+    # BOŞALIYORDU (assert root._toast_queue == ["İkinci mesaj"] rastgele
+    # basarisiz oluyordu). Gercek zamana (sleep/tick) bagli kalmak yerine,
+    # 0.3s'lik zamanlayicinin SÜRESİ DOLDUĞUNDA calisacak fonksiyonu
+    # (_show_next_toast) DOGRUDAN cagirarak ayni davranisi (kuyruktaki
+    # sonraki mesajin gosterilmesi, kuyrugun degismesi) sifir zamanlama
+    # belirsizligiyle dogruluyoruz.
+    root._advance_toast_queue()  # birincinin suresi doldu -> kuyruktan cikar, 0.3s sonrasi icin zamanlar
+    assert root._toast_queue == ["İkinci mesaj"], \
+        "birinci mesaj kuyruktan cikmali, ikincisi kuyrukta beklemeli"
+    root._show_next_toast()  # 0.3s'lik zamanlayicinin SÜRESİ DOLDUĞUNDA calisacak olan
     assert root.toast_label.text == "İkinci mesaj", "sirada bekleyen ikinci mesaj simdi gosterilmeli"
     assert root._toast_queue == ["İkinci mesaj"]
 
