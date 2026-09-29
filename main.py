@@ -780,9 +780,21 @@ class ProgramScreen(Screen):
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
             content.add_widget(w)
 
-        popup = Popup(title="Hedef", content=content, size_hint=(0.9, None))
-        fit_popup_to_content(popup, content)
-
+        # KOK NEDEN (kullanicinin gonderdigi ekran goruntusunde "‹ Geri"
+        # kutusu duzgun ama hemen yanindaki hareket adi ve altindaki alanlar
+        # arka plansiz gorunup arkadaki gun kartinin satiri sizmasi): Popup
+        # ONCEDEN yari-dolu bir content ile OLUSTURULUYOR, SONRA title_row'a
+        # (geri butonu + isim) ve content'e (Kaydet butonu) daha fazla widget
+        # EKLENIYORDU. Popup'in kendi arka plan/boyut hesaplamasi
+        # (fit_popup_to_content -> content.bind(minimum_height=...)) her
+        # ekleme ile TEKRAR TEKRAR tetikleniyordu - Popup zaten ACILMIS
+        # (veya acilmaya hazirlanirken) boyle asamali buyumeler, gercek
+        # cihazda Popup'in kendi arka plan dikdortgeninin YENI icerigin
+        # tamamini henuz kapsamadigi bir ara kareyi GORUNUR kilabiliyordu.
+        # DUZELTME: content'i (title_row'un TAM icerigi + tum steplar + Kaydet
+        # butonu dahil) TAMAMEN bitirdikten SONRA Popup'i olusturup boyutunu
+        # TEK SEFERDE hesapliyoruz - Popup hic yari-dolu bir content ile var
+        # olmuyor.
         if on_back is not None:
             def do_back(*_a):
                 popup.dismiss(animation=False)
@@ -818,6 +830,10 @@ class ProgramScreen(Screen):
 
         save_btn.bind(on_release=do_save)
         content.add_widget(save_btn)
+        # content ARTIK TAMAMEN HAZIR (title_row + 6 stepper + Kaydet) -
+        # Popup'i ve boyutunu SIMDI, TEK SEFERDE olusturuyoruz.
+        popup = Popup(title="Hedef", content=content, size_hint=(0.9, None))
+        fit_popup_to_content(popup, content)
         # animation=False: Popup.open() de VARSAYILAN olarak solarak
         # (alpha 0->1) acilir - bu popup ozellikle arama+klavye akisindan
         # (yukaridaki Window.on_resize bekleyisinden) HEMEN sonra acildigi
