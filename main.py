@@ -60,6 +60,18 @@ STEEL = (0x5B/255, 0x7F/255, 0xB5/255, 1)
 # cunku .spec dosyasi APK'nin icine gomulmuyor (source.include_exts'te yok).
 APP_VERSION = "1.0"
 
+# BUILD_STAMP: her APK'nin HANGI koddan derlendigini Ayarlar > Hakkinda'da
+# gorunur kilmak icin. KOK NEDEN: APP_VERSION hicbir zaman degismiyordu -
+# yani art arda derlenen COK FARKLI APK'lar bile telefonda hep ayni "sürüm
+# 1.0" yazisini gosteriyordu; kullanicinin (ve bizim) o an telefonda GERCEKTEN
+# hangi duzeltmenin kurulu oldugunu dogrulamanin hicbir yolu yoktu. Bu satir,
+# GitHub Actions is akisinda (.github/workflows/build-apk.yml) derlemeden
+# HEMEN once gercek git commit kisa hash'i + UTC derleme zamaniyla
+# DEGISTIRILIYOR (bkz. o dosyadaki "Build stamp'i main.py'ye gom" adimi).
+# Burada duz calistirilirsa (ör. bu ortamda test ederken) placeholder olarak
+# kalir - zararsizdir, sadece Ayarlar ekraninda "dev" gorunur.
+BUILD_STAMP = "__BUILD_STAMP__"
+
 
 # ---------------------------------------------------------------------------
 # Birim sistemi (kg / lb)
@@ -806,7 +818,14 @@ class ProgramScreen(Screen):
 
         save_btn.bind(on_release=do_save)
         content.add_widget(save_btn)
-        popup.open()
+        # animation=False: Popup.open() de VARSAYILAN olarak solarak
+        # (alpha 0->1) acilir - bu popup ozellikle arama+klavye akisindan
+        # (yukaridaki Window.on_resize bekleyisinden) HEMEN sonra acildigi
+        # icin, ayni anda hem pencere yeniden duzeni hem de bu fade-in
+        # animasyonu calisirsa cihazda ekstra agir/tutarsiz bir kare
+        # olusabilir - bildirilen kaymanin bir parcasi bu da olabilir.
+        # Aninda (solmadan) acarak bu ihtimali de ortadan kaldiriyoruz.
+        popup.open(animation=False)
 
     # ---- Aktif antrenman ----
     def start_session(self, day_id, is_deload=False):
@@ -1346,6 +1365,9 @@ class SettingsScreen(Screen):
         # ---- Hakkinda ----
         col.add_widget(self.section_header("HAKKINDA"))
         col.add_widget(label(f"Tonaj — sürüm {APP_VERSION}", color=FAINT, size=14, height=dp(22)))
+        # Hangi APK'nin telefonda kurulu oldugunu (hangi commit'ten, ne zaman
+        # derlendigini) dogrulamak icin - bkz. BUILD_STAMP tanimindaki not.
+        col.add_widget(label(f"Build: {BUILD_STAMP}", color=FAINT, size=12, height=dp(20)))
         col.add_widget(label("Verilerin bu cihazda kalıcı olarak saklanıyor.", color=FAINT, size=14, height=dp(22)))
 
         scroll.add_widget(col)

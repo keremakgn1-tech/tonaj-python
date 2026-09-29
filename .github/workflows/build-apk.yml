@@ -15,6 +15,26 @@ jobs:
       - name: Depoyu al
         uses: actions/checkout@v4
 
+      - name: Build stamp'i main.py'ye gom
+        # KOK NEDEN: main.py'deki APP_VERSION hicbir zaman degismiyordu -
+        # art arda derlenen COK FARKLI APK'lar bile telefonda hep ayni
+        # "sürüm 1.0" yazisini gosteriyordu, kullanicinin telefonda GERCEKTEN
+        # hangi duzeltmenin kurulu oldugunu dogrulamasinin hicbir yolu yoktu.
+        # Burada GERCEK commit kisa hash'ini + UTC derleme zamanini
+        # BUILD_STAMP placeholder'inin yerine yaziyoruz; placeholder
+        # bulunamazsa (main.py'de o satir yanlislikla silinmis/degismisse)
+        # build'i BASARISIZ yapiyoruz - sessizce damgasiz bir APK
+        # cikmasindansa build'in kirilmasi daha iyi.
+        run: |
+          STAMP="$(git rev-parse --short HEAD) · $(date -u +%Y-%m-%d\ %H:%M)UTC"
+          echo "Build stamp: $STAMP"
+          grep -q '__BUILD_STAMP__' main.py || {
+            echo "HATA: main.py icinde __BUILD_STAMP__ placeholder'i bulunamadi - build stamp gomulamiyor." >&2
+            exit 1
+          }
+          sed -i "s/__BUILD_STAMP__/${STAMP}/" main.py
+          grep '^BUILD_STAMP' main.py
+
       - name: Buildozer'in resmi Docker imajiyla APK derle
         run: |
           docker run --rm \
