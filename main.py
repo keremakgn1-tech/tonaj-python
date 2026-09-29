@@ -608,6 +608,12 @@ class ProgramScreen(Screen):
         def build_body(*_a):
             content.clear_widgets()
 
+            # Klavye HENUZ acilmadan once pencerenin "tam" (kucultulmemis)
+            # yuksekligini referans olarak saklıyoruz - asagidaki pick()
+            # icinde klavyenin GERCEKTEN kapanip kapanmadigini (sabit bir
+            # sure tahmin etmek yerine) buna gore anliyoruz.
+            full_window_height = Window.height
+
             # NOT (Geri butonu tasindi): burada ayri bir "‹ Geri" butonu
             # ARTIK YOK - kullanici geri bildirimiyle bunun "yanlis yerde"
             # oldugunu, asil ihtiyacin bir hareket SECTIKTEN SONRA (Hedef
@@ -660,26 +666,47 @@ class ProgramScreen(Screen):
                         # klavyeyi acar ve pencereyi kucultur (adjustResize).
                         # Sonuca dokununca klavye ODAK KAYBEDINCE kapanmaya
                         # BASLAR ama bu KAPANMA/yeniden-buyume ANLIK degil -
-                        # Android'in kendi birkac yuz ms'lik kapanma
-                        # animasyonu var. O animasyon bitmeden Hedef popup'ini
-                        # acip fit_popup_to_content() ile boyutunu
+                        # Android'in kendi (cihazdan cihaza degisen suredeki)
+                        # kapanma animasyonu var. O animasyon bitmeden Hedef
+                        # popup'ini acip fit_popup_to_content() ile boyutunu
                         # HESAPLARSAK, hesaplama HALA kucuk (klavye acikken
-                        # kucultulmus) pencereye gore yapiliyor - klavye
-                        # kapanip pencere asil boyutuna donunce popup'in
-                        # boyutu/konumu ESKI kalmis oluyor, ekranda tam olarak
-                        # bildirilen kayma/ust uste binme buradan geliyor.
-                        # Arama kutusu odaktaysa (klavye acikken) once odagi
-                        # birakip klavyenin kapanmasi icin kisa bir sure
-                        # bekliyoruz; klavye hic acilmadiysa (dogrudan
-                        # listeden secim) hicbir gecikme eklemiyoruz - o yol
-                        # zaten anindaydi ve oyle kalmali.
+                        # kucultulmus) pencereye gore yapiliyor.
+                        #
+                        # ONCEKI DUZELTME (sabit 0.3sn bekleme) YETERSIZ
+                        # CIKTI - kullanici ayni kaymayi tekrar bildirdi.
+                        # Sabit bir sure TAHMIN ETMEK yerine, pencerenin
+                        # GERCEKTEN eski (klavyesiz) yuksekligine donmesini
+                        # Window.on_resize event'i ile BEKLIYORUZ - boylece
+                        # cihaz ne kadar yavas/hizli olursa olsun doğru
+                        # anda aciliyoruz. Resize event hic gelmezse (bazi
+                        # cihaz/durumlarda olabilir) 1.5sn'lik bir guvenlik
+                        # agi var, sonsuza kadar beklemeyelim diye.
                         had_focus = search.focus
                         search.focus = False
                         popup.dismiss(animation=False)
-                        if had_focus:
-                            Clock.schedule_once(lambda *_b: on_pick(name), 0.3)
-                        else:
+
+                        if not had_focus or Window.height >= full_window_height - dp(2):
+                            # Klavye hic acilmadiysa (dogrudan listeden secim)
+                            # VEYA pencere zaten tam yuksekligindeyse (klavye
+                            # zaten kapanmis) hicbir gecikme yok - aninda ac.
                             on_pick(name)
+                            return
+
+                        state = {"done": False}
+
+                        def proceed(*_b):
+                            if state["done"]:
+                                return
+                            state["done"] = True
+                            Window.unbind(on_resize=on_resize_cb)
+                            on_pick(name)
+
+                        def on_resize_cb(*_b):
+                            if Window.height >= full_window_height - dp(2):
+                                proceed()
+
+                        Window.bind(on_resize=on_resize_cb)
+                        Clock.schedule_once(proceed, 1.5)  # guvenlik agi
 
                     b.bind(on_release=pick)
                     col.add_widget(b)
