@@ -608,11 +608,14 @@ class ProgramScreen(Screen):
         def build_body(*_a):
             content.clear_widgets()
 
+            # NOT (Geri butonu tasindi): burada ayri bir "‹ Geri" butonu
+            # ARTIK YOK - kullanici geri bildirimiyle bunun "yanlis yerde"
+            # oldugunu, asil ihtiyacin bir hareket SECTIKTEN SONRA (Hedef
+            # ekraninda) "vazgecip baska hareket seçeyim" durumunda oldugunu
+            # belirtti. Bkz. open_target_editor()'daki on_back parametresi.
+            # Bu listeyi hicbir sey secmeden kapatmak icin popup'in disina
+            # dokunmak yeterli (Popup varsayilani auto_dismiss=True).
             header = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
-            back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
-                                      size_hint=(None, None), size=(dp(84), dp(44)))
-            header.add_widget(back_btn)
-
             search = TextInput(
                 hint_text="Hareket ara…", multiline=False,
                 size_hint_y=None, height=dp(44),
@@ -622,17 +625,6 @@ class ProgramScreen(Screen):
             )
             header.add_widget(search)
             content.add_widget(header)
-
-            def do_back(*_a):
-                # Geri'ye basildiginda da klavye acik olabilir (arama
-                # kutusundayken) - once odagi birakip klavyeyi kapatiyoruz,
-                # sonra popup'i kapatiyoruz. Burada yeni bir popup acilmadigi
-                # icin (yukaridaki pick() fonksiyonunun aksine) bekleme
-                # gerekmiyor.
-                search.focus = False
-                popup.dismiss(animation=False)
-
-            back_btn.bind(on_release=do_back)
 
             names_sorted = sorted(core.all_exercise_names(app.state))
 
@@ -703,12 +695,28 @@ class ProgramScreen(Screen):
 
     def open_exercise_picker(self, day_id):
         def on_pick(name):
-            self.open_target_editor({"id": day_id}, name)
+            # on_back: kullanici Hedef ekranindayken "‹ Geri"ye basarsa,
+            # tekrar hareket arama/secme listesine donsun (baska bir
+            # hareket secebilsin) - bkz. open_target_editor()'daki not.
+            def on_back():
+                self.open_exercise_picker(day_id)
+            self.open_target_editor({"id": day_id}, name, on_back=on_back)
         self._build_exercise_picker("Hareket Seç", on_pick)
 
-    def open_target_editor(self, day, name):
+    def open_target_editor(self, day, name, on_back=None):
         # Bu popup'taki alanlar (Set/Tekrar min/Tekrar max/Agirlik/RIR/
         # Dinlenme) klavye kullanmiyor - bkz. make_stepper() tanimindaki not.
+        #
+        # on_back (kullanici bildirimiyle eklendi - "Geri" butonu ONCEDEN
+        # hareket arama listesinde idi, kullanici bunun "yanlis yerde"
+        # oldugunu, asil ihtiyacin bir hareket SECTIKTEN SONRA "vazgecip
+        # baska hareket seçeyim" durumunda oldugunu belirtti): SADECE
+        # day_card()'daki "+ Hareket" -> secim akisindan (open_exercise_picker
+        # uzerinden) gelindiginde doludur - o zaman "‹ Geri" gorunur ve
+        # tekrar hareket listesini acar. Gundeki VAROLAN bir harekete
+        # dokunup (day_card icindeki row.on_release) hedefini duzenlerken
+        # None kalir - donulecek bir "onceki liste ekrani" olmadigi icin
+        # orada "‹ Geri" hic gosterilmez.
         app = App.get_running_app()
         state = app.state
         day_obj = next((d for d in state["program"]["days"] if d["id"] == day["id"]), None)
@@ -716,7 +724,9 @@ class ProgramScreen(Screen):
 
         content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10), size_hint_y=None)
         content.bind(minimum_height=content.setter("height"))
-        content.add_widget(label(name, size=17, bold=True, height=dp(28)))
+
+        title_row = BoxLayout(size_hint_y=None, height=dp(32), spacing=dp(8))
+        content.add_widget(title_row)
 
         sets_i = make_stepper("Set", existing.get("targetSets"), step=1)
         rmin_i = make_stepper("Tekrar min", existing.get("targetRepsMin"), step=1)
@@ -733,6 +743,17 @@ class ProgramScreen(Screen):
 
         popup = Popup(title="Hedef", content=content, size_hint=(0.9, None))
         fit_popup_to_content(popup, content)
+
+        if on_back is not None:
+            def do_back(*_a):
+                popup.dismiss(animation=False)
+                on_back()
+            back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
+                                      size_hint=(None, None), size=(dp(84), dp(32)))
+            back_btn.bind(on_release=do_back)
+            title_row.add_widget(back_btn)
+        title_row.add_widget(label(name, size=17, bold=True, height=dp(28)))
+
         save_btn = styled_button("Kaydet")
 
         def to_num(value, cast=int):
@@ -749,7 +770,11 @@ class ProgramScreen(Screen):
                 target_rir=to_num(rir_i.value), rest_seconds=to_num(rest_i.value),
             )
             app.save()
-            popup.dismiss()
+            # animation=False: diger tum popup gecislerinde oldugu gibi (bkz.
+            # _build_exercise_picker'daki notlar) - kullanici hemen ardindan
+            # baska bir hareketin hedefini acarsa, eski (hala solmakta olan)
+            # Hedef popup'i ile yenisi ust uste binmesin.
+            popup.dismiss(animation=False)
             self.render()
 
         save_btn.bind(on_release=do_save)
