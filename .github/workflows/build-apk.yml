@@ -28,7 +28,31 @@ jobs:
         # gecmis karsilastirma) kapsiyor - burada BASARISIZ olursa,
         # 5-15 dakika suren Android derlemesine hic girmeden erken ve
         # ucretsiz sekilde durup haber veriyoruz.
-        run: python3 -m pytest tests/ -v
+        #
+        # NOT: burada BILEREK "tests/" degil "tests/test_core.py" veriyoruz -
+        # tests/smoke_test.py da pytest'in varsayilan "*_test.py" desenine
+        # uydugu icin dizin verilseydi pytest onu da TOPLAMAYA (import
+        # etmeye) calisirdi; smoke_test.py Kivy'ye ihtiyac duyar ve bu adimda
+        # (bilerek) sadece pytest kurulu - Kivy'yi gerektiren UI duman testi
+        # asagida AYRI, kendi adiminda (kendi bagimliliklariyla) calisiyor.
+        run: python3 -m pytest tests/test_core.py -v
+
+      - name: UI duman testi icin sistem bagimliliklarini kur (Kivy + xvfb)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb libsdl2-2.0-0 libmtdev1
+          pip install --break-system-packages "kivy==2.3.1"
+
+      - name: UI duman testini calistir (main.py + core.py, gercek Kivy ile)
+        # KOK NEDEN (kod incelemesinde bulundu - "smoke_test.py hic repoya
+        # kaydedilmemis"): bu oturumda "kayma" (popup render glitch) hatasi
+        # basta olmak uzere defalarca elle telefonda bulunan davranis
+        # kurallarini dogrulayan 29 adimlik test dosyasi SADECE gecici bir
+        # calisma dizininde duruyordu - repoya hic girmemisti, yani bir
+        # sonraki degisiklik bu regresyonlarin HICBIRINE karsi korumasizdi.
+        # Simdi tests/smoke_test.py olarak kalici, ve CI'da (xvfb ile
+        # headless olarak) her push'ta gercekten calistiriliyor.
+        run: xvfb-run -a python3 tests/smoke_test.py
 
       - name: Build stamp'i main.py'ye gom
         # KOK NEDEN: main.py'deki APP_VERSION hicbir zaman degismiyordu -

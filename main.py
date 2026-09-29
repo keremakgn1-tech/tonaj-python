@@ -1038,10 +1038,20 @@ class ProgramScreen(Screen):
         card = Card(size_hint_y=None, spacing=dp(4))
         card.bind(minimum_height=card.setter("height"))
 
+        # KOK NEDEN (kod incelemesinde bulundu - "max_weight_for her set
+        # eklemede tum gecmisi tariyor"): rebuild() bir antrenman sirasinda
+        # bu harekete HER set eklendiginde/silindiginde YENIDEN cagriliyor
+        # ve HER seferinde core.max_weight_for() ile TUM gecmisi (yuzlerce
+        # seans olabilir) bastan taniyordu. Oysa prev_max, state["history"]'ye
+        # bakar - AKTIF seans icindeki set ekleme/silme HICBIR ZAMAN
+        # gecmisi degistirmez, yani bu deger bu kartin omru boyunca
+        # SABITTIR. Tekrar tekrar hesaplamak yerine BIR KEZ hesaplayip
+        # closure'da saklıyoruz.
+        prev_max = core.max_weight_for(state, ex["name"])
+
         def rebuild(*_):
             card.clear_widgets()
             working = [s for s in ex["sets"] if not s.get("isWarmup")]
-            prev_max = core.max_weight_for(state, ex["name"])
             head = BoxLayout(size_hint_y=None, height=dp(32))
             head.add_widget(label(ex["name"], size=16, bold=True))
             # dp(32): kod incelemesinde bulunan "dokunma hedefi cok kucuk"
@@ -1664,6 +1674,7 @@ class RootWidget(FloatLayout):
         main_col.add_widget(nav)
         self.add_widget(main_col)
 
+        self._toast_queue = []
         self.toast_label = Label(text="", size_hint=(None, None), size=(dp(280), dp(44)),
                                   pos_hint={"center_x": 0.5, "top": 0.97},
                                   opacity=0, halign="center", valign="middle",
@@ -1736,9 +1747,34 @@ class RootWidget(FloatLayout):
             lbl.color = ACCENT if active else MUTED
 
     def show_toast(self, msg):
-        self.toast_label.text = msg
+        # KOK NEDEN (kod incelemesinde bulundu - "toast bildirimleri
+        # kuyruklanmiyor"): ONCEDEN bir toast gosterilirken (orn. "YENİ
+        # REKOR — PR!") hemen ardindan bir baskasi (orn. baska bir hareketle
+        # art arda gelen ikinci bir PR) gelirse, ikincisi birincinin
+        # SUResini/metnini dogrudan USTUNE YAZIYORDU - kullanici ilk
+        # bildirimi hic goremeden kaybediyordu. Simdi mesajlar bir kuyrukta
+        # birikip SIRAYLA, her biri kendi suresi kadar gorunecek sekilde
+        # gosteriliyor.
+        self._toast_queue.append(msg)
+        if len(self._toast_queue) == 1:
+            self._show_next_toast()
+
+    def _show_next_toast(self, *_):
+        if not self._toast_queue:
+            return
+        self.toast_label.text = self._toast_queue[0]
         self.toast_label.opacity = 1
-        Clock.schedule_once(lambda *_: setattr(self.toast_label, "opacity", 0), 1.6)
+        Clock.schedule_once(self._advance_toast_queue, 1.6)
+
+    def _advance_toast_queue(self, *_):
+        self.toast_label.opacity = 0
+        if self._toast_queue:
+            self._toast_queue.pop(0)
+        if self._toast_queue:
+            # Bir sonraki mesaja gecmeden once kisa bir bosluk - ust uste
+            # iki toast'in ayni anda/kesintisiz gorunmesini (bir onceki
+            # solma animasyonuyla cakismasini) onler.
+            Clock.schedule_once(self._show_next_toast, 0.3)
 
 
 # ---------------------------------------------------------------------------
