@@ -108,43 +108,27 @@ jobs:
           path: .ci-cache/android-home
           key: android-debug-keystore-v1
 
-      - name: Buildozer/python-for-android indirmelerini cache'le
-        # KOK NEDEN (kod incelemesinde bulundu - "CI'da hic cache kullanilmiyor"):
-        # .buildozer dizini Android SDK/NDK ve python-for-android'in indirdigi
-        # butun bagimliliklari (yuzlerce MB) barindirir - bu ONCEDEN her
-        # calismada sifirdan indiriliyordu, build'leri gereksiz yere uzatiyordu.
-        # buildozer.spec degismedigi surece (requirements/android ayarlari
-        # ayni kaldigi surece) bu indirmeler runlar arasinda AYNI - cache'den
-        # geri yuklemek build suresini onemli olcude kisaltir.
-        #
-        # KOK NEDEN 2 (bu tani turunda issue #1 yorumundan BULUNDU - "Available
-        # Android APIs are (): Requested API target 34 is not available"):
-        # tani script'inin grep bloğu, tum log icinde sdkmanager/lisans/platform
-        # indirme ile ilgili TEK BIR satir bile bulamadi - yani p4a, SDK
-        # platformunu/build-tools'u indirmeye HIC TESEBBUS ETMEDI, dogrudan
-        # bos bir platform listesiyle karsilasti. Bunun en olasi sebebi: bu
-        # "buildozer-<hash>" anahtarli cache, DISK DOLU HATASININ (c30386b'de
-        # duzeltildi) hala gerceklestigi ONCEKI bir calismada YARIM/BOZUK
-        # (android-sdk dizini var ama platforms/build-tools icinde hicbir sey
-        # yok) olarak KAYDEDILMIS olmasi - actions/cache bir anahtar zaten
-        # varsa YENIDEN KAYDETMEZ, yani buildozer.spec hic degismedigi surece
-        # (ki degismedi) TUM SONRAKI calismalar sonsuza kadar bu ayni BOZUK
-        # cache'i geri yukleyip p4a'nin "SDK zaten kurulu" sanmasina (ve
-        # gercekte icinde platform olmadigini fark etmeden hemen basarisiz
-        # olmasina) sebep oluyordu.
-        #
-        # DUZELTME: anahtar onekini "buildozer-" -> "buildozer-v2-" yaptik
-        # (hem key hem restore-keys) - GitHub'in restore-keys ONEK eslesmesi
-        # eskiyi bir daha asla getirmeyecek, bu calisma SIFIRDAN temiz bir SDK
-        # kurup dogru sekilde cache'e YENIDEN yazacak. Cache boyutu (~birkac
-        # yuz MB - GB) nedeniyle bu calisma daha uzun surecek (ilk kurulum
-        # gibi) - bu BEKLENEN ve GEREKLI bir tek seferlik maliyet.
-        uses: actions/cache@v4
-        with:
-          path: .buildozer
-          key: buildozer-v2-${{ hashFiles('buildozer.spec') }}
-          restore-keys: |
-            buildozer-v2-
+      # KOK NEDEN 3 (issue #1'deki tekrar eden yorumlardan BULUNDU): "v2"
+      # anahtarina gecmek TEK BASINA yetmedi - 0757ab3 commit'i SIFIRDAN
+      # (cache miss) basarili bir SDK kurup cache'e kaydetti (issue #1'de
+      # "CI artik yesil" yorumu), ama HEMEN SONRAKI calisma AYNI v2
+      # anahtarindan cache'i geri yukleyip YINE "Available Android APIs
+      # are (): Requested API target 34 is not available" ile patladi -
+      # yani cache restore edilirken (Android SDK/NDK gibi cok sayida
+      # kucuk dosya + sembolik link iceren buyuk bir agaç) BOZULUYOR, bu
+      # bir anahtar-siniflandirma sorunu degil, actions/cache'in bu TUR
+      # (Android SDK) icerikte GUVENILIR OLMADIGININ kaniti. Anahtari
+      # tekrar tekrar degistirmek (v3, v4...) ayni riski her seferinde
+      # tekrar uretir.
+      #
+      # DUZELTME: .buildozer cache'ini TAMAMEN KALDIRDIK - her calisma
+      # SDK/NDK'yi sifirdan indirip kurar (build ~13-15dk suruyor, cache'li
+      # halinden birkac dakika daha uzun) ama HER ZAMAN calisir durumda
+      # bir SDK ile baslar. Hiz kaybi, "derleme rastgele/tekrarlayan
+      # sekilde bozuk bir SDK ile basarisiz oluyor" riskinden kesinlikle
+      # daha iyi bir odun. (NOT: debug keystore cache'i - YUKARIDAKI onceki
+      # adim - BURADAN FARKLI: o tek bir kucuk dosya, sembolik link/karmasik
+      # agac icermiyor, o yuzden guvenilir kaliyor ve KALDIRILMADI.)
 
       - name: Buildozer'in resmi Docker imajiyla APK derle icin diskte yer ac
         # KOK NEDEN (bu commit'te eklenen UI duman testi adimlari icin
