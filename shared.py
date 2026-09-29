@@ -280,9 +280,35 @@ def label(text, size=16, color=TEXT, bold=False, halign="left", **kw):
     return lb
 
 
+# Task 21 (yazi tipi boyutu ayari) - kullanicinin Ayarlar'dan sectigi
+# olcek burada TEK bir yerde tanimli; hem settings.py'deki secim
+# butonlari hem de asagidaki sp_() bu sozlugu kullanir, boylece ikisi
+# HICBIR ZAMAN birbirinden farkli/eskimis bir liste kullanamaz.
+FONT_SCALE_CHOICES = (
+    ("Küçük", 0.85),
+    ("Normal", 1.0),
+    ("Büyük", 1.2),
+)
+
+
+def font_scale():
+    # KOK NEDEN/DESEN: weight_unit() ile AYNI desen - App.get_running_app()
+    # her cagrida DOGRUDAN okunur, ayri bir modul-seviyesi degisken/cache
+    # TUTULMAZ. Boylece kullanici Ayarlar'da yazi boyutunu degistirip
+    # app.save() cagirdigi anda, bir SONRAKI ekran render'inda (screen'lerin
+    # on_pre_enter'i zaten her girişte render() cagiriyor) sp_() OTOMATIK
+    # olarak guncel degeri okur - ayri bir "tum ekranlari yeniden olustur"
+    # mekanizmasina hic gerek kalmaz.
+    try:
+        app = App.get_running_app()
+        return (app.state.get("settings") or {}).get("fontScale", 1.0)
+    except Exception:
+        return 1.0
+
+
 def sp_(v):
     from kivy.metrics import sp
-    return sp(v)
+    return sp(v) * font_scale()
 
 
 def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,

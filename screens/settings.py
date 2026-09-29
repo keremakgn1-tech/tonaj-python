@@ -26,7 +26,8 @@ from kivy.utils import platform
 import core
 from shared import (
     RAISED, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER,
-    weight_unit, confirm_dialog, styled_button, label, toast, dp,
+    weight_unit, font_scale, FONT_SCALE_CHOICES,
+    confirm_dialog, styled_button, label, toast, dp,
 )
 
 
@@ -71,6 +72,33 @@ class SettingsScreen(Screen):
         col.add_widget(label(
             "Tüm ağırlıklar bu birimde gösterilir. Kayıtlı veri her zaman kg "
             "olarak tutulur, birim değiştirmek geçmiş verini bozmaz.",
+            color=FAINT, size=13, height=dp(40)))
+
+        # ---- Yazi tipi boyutu ----
+        # KOK NEDEN (kullanicidan gelen istek - Task 21): uygulamadaki tum
+        # yazi boyutlari sabitti, kucuk ekranli/gorme guclugu olan
+        # kullanicilar icin ayarlanamiyordu. sp_() artik shared.font_scale()
+        # ile carpiliyor (bkz. o fonksiyondaki not) - burada SADECE bu
+        # olcegi secip app.state["settings"]["fontScale"]'a yaziyoruz.
+        col.add_widget(self.section_header("YAZI TİPİ BOYUTU"))
+        cur_scale = font_scale()
+
+        def set_font_scale(v, *_):
+            app.state.setdefault("settings", {})["fontScale"] = v
+            app.save()
+            self.render()
+
+        scale_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        for name, val in FONT_SCALE_CHOICES:
+            is_cur = abs(val - cur_scale) < 0.001
+            btn = styled_button(name, color=ACCENT if is_cur else RAISED,
+                                 text_color=ACCENT_DARK if is_cur else TEXT)
+            btn.bind(on_release=lambda *_, v=val: set_font_scale(v))
+            scale_row.add_widget(btn)
+        col.add_widget(scale_row)
+        col.add_widget(label(
+            "Uygulamadaki tüm yazıların boyutunu değiştirir. Değişiklik "
+            "diğer ekranlara bir sonraki girişinde yansır.",
             color=FAINT, size=13, height=dp(40)))
 
         # ---- Yedekleme ----

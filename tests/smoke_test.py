@@ -744,6 +744,80 @@ def step_settings_shows_build_stamp():
 safe("settings screen shows a build stamp", step_settings_shows_build_stamp)
 
 
+def step_font_scale_setting_persists_and_applies():
+    # Task 21 - yazi tipi boyutu ayari: Ayarlar > "Büyük" secilince
+    # app.state["settings"]["fontScale"] guncellenmeli, kalici olarak
+    # kaydedilmeli (app.save() cagrilmali) VE shared.sp_() bir SONRAKI
+    # cagrisinda bu yeni degeri yansitmali (bkz. shared.font_scale()
+    # deki "weight_unit() ile ayni desen" notu - ayri bir global/cache
+    # yok, her seferinde app.state'ten canli okunuyor).
+    from shared import sp_, tr_upper
+    import kivy.metrics as kivy_metrics
+
+    go("settings")
+    settings_screen.on_pre_enter()
+
+    normal_sp16 = sp_(16)
+
+    # styled_button() gorunen metni tr_upper() ile BUYUK harfe cevirir
+    # (bkz. o fonksiyondaki not) - button.text "Büyük" degil "BÜYÜK" olur.
+    buyuk_btn = find_text(settings_screen, tr_upper("Büyük"), exact=True)
+    assert buyuk_btn is not None, "Ayarlar ekraninda 'Büyük' yazi boyutu butonu bulunamadi"
+    click(buyuk_btn)
+
+    assert app.state["settings"]["fontScale"] == 1.2, \
+        "Büyük secilince fontScale 1.2 olarak kaydedilmeli"
+    # app.save() gercekte debounce edilmis (0.5s sonra, ayri bir thread'de
+    # yazan) bir Clock.schedule_once - bkz. TonajApp.save()'deki KOK NEDEN
+    # notu. Testte gercek 0.5s+thread beklemek yerine, o zamanlayici
+    # ateslendiginde calisacak olan _flush_save()'i DOGRUDAN cagirip ayni
+    # yazmayi senkron/deterministik olarak tetikliyoruz.
+    if app._save_pending is not None:
+        app._save_pending.cancel()
+    app._flush_save()
+    # _flush_save() asil dosya yazmasini AYRI BIR THREAD'e devrediyor (bkz.
+    # oradaki KOK NEDEN notu) - yani cagirdiktan hemen sonra dosya HENUZ
+    # yazilmamis olabilir. Sabit bir sleep yerine, kisa araliklarla dosyayi
+    # okuyup beklenen degeri gorene kadar (ya da makul bir sure sonra
+    # pes edip asagidaki assert'in patlamasina izin vererek) bekliyoruz.
+    for _ in range(50):
+        try:
+            _probe, _n, _r = core.load_state(main.get_data_path())
+            if _probe.get("settings", {}).get("fontScale") == 1.2:
+                break
+        except Exception:
+            pass
+        time.sleep(0.05)
+
+    buyuk_sp16 = sp_(16)
+    assert buyuk_sp16 > normal_sp16, \
+        "fontScale buyuyunce sp_() de daha buyuk bir piksel degeri dondurmeli"
+    assert abs(buyuk_sp16 - kivy_metrics.sp(16) * 1.2) < 0.01
+
+    # Ekran gercekten yeniden render edildi mi (secili buton artik
+    # vurgulanmis mi) - on_pre_enter zaten render() cagiriyor, click()
+    # de set_font_scale() icinde self.render() cagiriyor, yeni bir
+    # on_pre_enter'a gerek yok.
+    buyuk_btn_after = find_text(settings_screen, tr_upper("Büyük"), exact=True)
+    assert buyuk_btn_after is not None
+
+    # Kaydin GERCEKTEN kalici oldugunu (sadece bellekte degil) dogrula -
+    # core.load_state ile diskten TEKRAR oku.
+    saved, _is_new, _recovered = core.load_state(main.get_data_path())
+    assert saved["settings"]["fontScale"] == 1.2, \
+        "fontScale diske kaydedilmemis (app.save() calismamis olabilir)"
+
+    # Sonraki testleri etkilememesi icin Normal'a geri don.
+    normal_btn = find_text(settings_screen, tr_upper("Normal"), exact=True)
+    assert normal_btn is not None
+    click(normal_btn)
+    assert app.state["settings"]["fontScale"] == 1.0
+    assert abs(sp_(16) - normal_sp16) < 0.01, "Normal'a donunce eski sp_() degerine donmeli"
+
+safe("settings: font-size (yazı tipi boyutu) setting persists and applies to sp_()",
+     step_font_scale_setting_persists_and_applies)
+
+
 def step_delete_day():
     go("program")
     program_screen.edit_mode = True

@@ -519,7 +519,7 @@ def default_state():
         "program": {"days": []},
         "muscleGroups": {},
         "bodyweightLog": [],
-        "settings": {"lastBackupAt": None, "weightUnit": "kg"},
+        "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0},
     }
 
 
@@ -558,6 +558,22 @@ def validate_state_schema(data):
         raise ValueError("'library' bir liste olmalı")
     if data["activeSession"] is not None and not isinstance(data["activeSession"], dict):
         raise ValueError("'activeSession' null ya da obje olmalı")
+
+    # Task 21 (yazi tipi boyutu ayari) - "settings" zorunlu bir alan degil
+    # (eski yedeklerde hic olmayabilir, bkz. yukaridaki "required" listesi),
+    # ama VARSA ve icinde fontScale VARSA gecerli/makul bir sayi olmali;
+    # yoksa elle bozulmus/eski bir yedek sp_() icinde sessizce garip bir
+    # yazi boyutuna ya da TypeError'a yol acardi.
+    settings = data.get("settings")
+    if settings is not None:
+        if not isinstance(settings, dict):
+            raise ValueError("'settings' bir obje olmalı")
+        font_scale = settings.get("fontScale")
+        if font_scale is not None:
+            if not isinstance(font_scale, (int, float)) or isinstance(font_scale, bool):
+                raise ValueError("'settings.fontScale' sayısal olmalı")
+            if not (0.5 <= font_scale <= 2.0):
+                raise ValueError("'settings.fontScale' 0.5 ile 2.0 arasında olmalı")
 
     def check_sets(sets, where):
         if not isinstance(sets, list):

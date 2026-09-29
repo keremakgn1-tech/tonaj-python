@@ -52,6 +52,7 @@ def test_default_state_shape():
     assert s["history"] == []
     assert s["program"] == {"days": []}
     assert s["library"] == []
+    assert s["settings"]["fontScale"] == 1.0
 
 
 def test_save_and_load_round_trip(tmp_path):
@@ -158,6 +159,46 @@ def test_validate_state_schema_accepts_valid_history():
     data = core.default_state()
     data["history"] = [make_history_session("Bench Press", [make_set(100, 5)])]
     core.validate_state_schema(data)  # patlamamali
+
+
+# ---------------------------------------------------------------------------
+# validate_state_schema - settings.fontScale (Task 21)
+# ---------------------------------------------------------------------------
+def test_validate_state_schema_rejects_non_numeric_font_scale():
+    data = core.default_state()
+    data["settings"]["fontScale"] = "buyuk"
+    with pytest.raises(ValueError, match="fontScale"):
+        core.validate_state_schema(data)
+
+
+def test_validate_state_schema_rejects_bool_font_scale():
+    # bool, Python'da int'in alt sinifi (isinstance(True, int) == True) -
+    # yanlislikla kabul edilmesin diye ayri bir test.
+    data = core.default_state()
+    data["settings"]["fontScale"] = True
+    with pytest.raises(ValueError, match="fontScale"):
+        core.validate_state_schema(data)
+
+
+def test_validate_state_schema_rejects_out_of_range_font_scale():
+    data = core.default_state()
+    data["settings"]["fontScale"] = 5.0
+    with pytest.raises(ValueError, match="fontScale"):
+        core.validate_state_schema(data)
+
+
+def test_validate_state_schema_accepts_missing_settings():
+    # Eski yedeklerde "settings" hic olmayabilir - zorunlu degil.
+    data = core.default_state()
+    del data["settings"]
+    core.validate_state_schema(data)  # patlamamali
+
+
+def test_validate_state_schema_accepts_valid_font_scale_choices():
+    for _name, val in (("Küçük", 0.85), ("Normal", 1.0), ("Büyük", 1.2)):
+        data = core.default_state()
+        data["settings"]["fontScale"] = val
+        core.validate_state_schema(data)  # patlamamali
 
 
 # ---------------------------------------------------------------------------
