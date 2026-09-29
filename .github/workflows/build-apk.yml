@@ -116,12 +116,35 @@ jobs:
         # buildozer.spec degismedigi surece (requirements/android ayarlari
         # ayni kaldigi surece) bu indirmeler runlar arasinda AYNI - cache'den
         # geri yuklemek build suresini onemli olcude kisaltir.
+        #
+        # KOK NEDEN 2 (bu tani turunda issue #1 yorumundan BULUNDU - "Available
+        # Android APIs are (): Requested API target 34 is not available"):
+        # tani script'inin grep bloğu, tum log icinde sdkmanager/lisans/platform
+        # indirme ile ilgili TEK BIR satir bile bulamadi - yani p4a, SDK
+        # platformunu/build-tools'u indirmeye HIC TESEBBUS ETMEDI, dogrudan
+        # bos bir platform listesiyle karsilasti. Bunun en olasi sebebi: bu
+        # "buildozer-<hash>" anahtarli cache, DISK DOLU HATASININ (c30386b'de
+        # duzeltildi) hala gerceklestigi ONCEKI bir calismada YARIM/BOZUK
+        # (android-sdk dizini var ama platforms/build-tools icinde hicbir sey
+        # yok) olarak KAYDEDILMIS olmasi - actions/cache bir anahtar zaten
+        # varsa YENIDEN KAYDETMEZ, yani buildozer.spec hic degismedigi surece
+        # (ki degismedi) TUM SONRAKI calismalar sonsuza kadar bu ayni BOZUK
+        # cache'i geri yukleyip p4a'nin "SDK zaten kurulu" sanmasina (ve
+        # gercekte icinde platform olmadigini fark etmeden hemen basarisiz
+        # olmasina) sebep oluyordu.
+        #
+        # DUZELTME: anahtar onekini "buildozer-" -> "buildozer-v2-" yaptik
+        # (hem key hem restore-keys) - GitHub'in restore-keys ONEK eslesmesi
+        # eskiyi bir daha asla getirmeyecek, bu calisma SIFIRDAN temiz bir SDK
+        # kurup dogru sekilde cache'e YENIDEN yazacak. Cache boyutu (~birkac
+        # yuz MB - GB) nedeniyle bu calisma daha uzun surecek (ilk kurulum
+        # gibi) - bu BEKLENEN ve GEREKLI bir tek seferlik maliyet.
         uses: actions/cache@v4
         with:
           path: .buildozer
-          key: buildozer-${{ hashFiles('buildozer.spec') }}
+          key: buildozer-v2-${{ hashFiles('buildozer.spec') }}
           restore-keys: |
-            buildozer-
+            buildozer-v2-
 
       - name: Buildozer'in resmi Docker imajiyla APK derle icin diskte yer ac
         # KOK NEDEN (bu commit'te eklenen UI duman testi adimlari icin
