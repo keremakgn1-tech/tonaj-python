@@ -129,9 +129,34 @@ jobs:
           df -h /
           sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
                        /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
-                       /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+                       /usr/local/share/boost || true
           docker image prune -af || true
           df -h /
+
+      - name: DIAG - docker pull ile ayrintili hata yakala
+        continue-on-error: true
+        run: |
+          set +e
+          docker pull ghcr.io/kivy/buildozer:latest 2>&1 | tee /tmp/diag.log
+          echo "PULL_EXIT=$?" >> /tmp/diag.log
+          echo "---- docker run ----" >> /tmp/diag.log
+          mkdir -p .ci-cache/android-home
+          chmod 777 .ci-cache/android-home
+          docker run --rm \
+            -v "${{ github.workspace }}:/home/user/hostcwd" \
+            -v "${{ github.workspace }}/.ci-cache/android-home:/home/user/.android" \
+            ghcr.io/kivy/buildozer:latest android debug 2>&1 | tee -a /tmp/diag.log
+          echo "RUN_EXIT=$?" >> /tmp/diag.log
+          df -h / >> /tmp/diag.log
+          tail -c 60000 /tmp/diag.log > /tmp/diag_tail.log
+
+      - name: DIAG - log dosyasini artifact olarak yukle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diag-log
+          path: /tmp/diag_tail.log
+          retention-days: 3
 
       - name: Buildozer'in resmi Docker imajiyla APK derle
         run: |
