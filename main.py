@@ -611,7 +611,6 @@ class ProgramScreen(Screen):
             header = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(6))
             back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
                                       size_hint=(None, None), size=(dp(84), dp(44)))
-            back_btn.bind(on_release=lambda *_: popup.dismiss(animation=False))
             header.add_widget(back_btn)
 
             search = TextInput(
@@ -623,6 +622,17 @@ class ProgramScreen(Screen):
             )
             header.add_widget(search)
             content.add_widget(header)
+
+            def do_back(*_a):
+                # Geri'ye basildiginda da klavye acik olabilir (arama
+                # kutusundayken) - once odagi birakip klavyeyi kapatiyoruz,
+                # sonra popup'i kapatiyoruz. Burada yeni bir popup acilmadigi
+                # icin (yukaridaki pick() fonksiyonunun aksine) bekleme
+                # gerekmiyor.
+                search.focus = False
+                popup.dismiss(animation=False)
+
+            back_btn.bind(on_release=do_back)
 
             names_sorted = sorted(core.all_exercise_names(app.state))
 
@@ -644,15 +654,42 @@ class ProgramScreen(Screen):
                 for n in matches:
                     b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="",
                                background_down="", background_color=RAISED, color=TEXT)
-                    # animation=False: normal (animasyonlu) dismiss ~0.25sn
-                    # boyunca solarak kapanir - bu sure icinde on_pick(name)
-                    # HEMEN yeni bir popup (Hedef) actigi icin, eski (solmakta
-                    # olan) popup ile yeni popup ile arkadaki Program ekrani
-                    # ust uste/yari saydam binip goruntu kaymasina/karismasina
-                    # sebep oluyordu. Aninda (animasyonsuz) kapatarak iki
-                    # popup'in asla ayni anda ekranda yari saydam durmamasini
-                    # sagliyoruz.
-                    b.bind(on_release=lambda *_, name=n: (popup.dismiss(animation=False), on_pick(name)))
+
+                    def pick(*_a, name=n):
+                        # KOK NEDEN 1 (dogrudan tiklamada da olan eski kayma):
+                        # normal (animasyonlu) dismiss ~0.25sn boyunca solarak
+                        # kapanir - bu sure icinde on_pick(name) HEMEN yeni bir
+                        # popup (Hedef) actigi icin iki popup ayni anda yari
+                        # saydam ust uste biniyordu. Aninda (animasyonsuz)
+                        # kapatarak bunu cozduk.
+                        #
+                        # KOK NEDEN 2 (SADECE arama kutusu kullanildiginda
+                        # devam eden kayma): arama kutusuna dokunulunca Android
+                        # klavyeyi acar ve pencereyi kucultur (adjustResize).
+                        # Sonuca dokununca klavye ODAK KAYBEDINCE kapanmaya
+                        # BASLAR ama bu KAPANMA/yeniden-buyume ANLIK degil -
+                        # Android'in kendi birkac yuz ms'lik kapanma
+                        # animasyonu var. O animasyon bitmeden Hedef popup'ini
+                        # acip fit_popup_to_content() ile boyutunu
+                        # HESAPLARSAK, hesaplama HALA kucuk (klavye acikken
+                        # kucultulmus) pencereye gore yapiliyor - klavye
+                        # kapanip pencere asil boyutuna donunce popup'in
+                        # boyutu/konumu ESKI kalmis oluyor, ekranda tam olarak
+                        # bildirilen kayma/ust uste binme buradan geliyor.
+                        # Arama kutusu odaktaysa (klavye acikken) once odagi
+                        # birakip klavyenin kapanmasi icin kisa bir sure
+                        # bekliyoruz; klavye hic acilmadiysa (dogrudan
+                        # listeden secim) hicbir gecikme eklemiyoruz - o yol
+                        # zaten anindaydi ve oyle kalmali.
+                        had_focus = search.focus
+                        search.focus = False
+                        popup.dismiss(animation=False)
+                        if had_focus:
+                            Clock.schedule_once(lambda *_b: on_pick(name), 0.3)
+                        else:
+                            on_pick(name)
+
+                    b.bind(on_release=pick)
                     col.add_widget(b)
 
             search.bind(text=lambda _w, val: refresh(val))
