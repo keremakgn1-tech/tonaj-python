@@ -21,8 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from kivy.clock import Clock
 from kivy.uix.popup import Popup
-from kivy.uix.button import Button
 from kivy.uix.textinput import TextInput
+from kivy.uix.recycleview import RecycleView
 from kivy.core.window import Window
 import main
 import core
@@ -78,6 +78,43 @@ def top_popup(title=None):
         if isinstance(w, Popup) and (title is None or w.title == title):
             return w
     return None
+
+
+# KOK NEDEN (Task 17 - hareket secici popup'i RecycleView'e gecti): eskiden
+# bu testler popup icindeki her esleşen hareket icin GERCEKTEN olusturulmus
+# bir Button widget'ini walk() ile arayip dogrudan tikliyordu - o zaman
+# TUM eslesenler (217'ye kadar) her zaman widget agacindaydi. RecycleView
+# ise (performans icin, bkz. main.py._PickerRow) SADECE O AN EKRANDA
+# GORUNEN satirlar icin gercek widget kurar; listenin geri kalani sadece
+# hafif "rv.data" dict'leri olarak var olur. Bu yuzden picker'la ilgili
+# testler artik Button widget'lari yerine dogrudan rv.data uzerinden
+# calisiyor - bu, GERCEK bir dokunmanin tetikleyecegi AYNI "on_release"
+# geri cagirimini calistirdigi icin davranissal olarak birebir esdeger
+# (sadece "widget agacinda arama" yerine "veri listesinde arama" oluyor).
+def _find_picker_rv(popup):
+    for w in popup.walk():
+        if isinstance(w, RecycleView):
+            return w
+    return None
+
+
+def picker_texts(popup):
+    rv = _find_picker_rv(popup)
+    return [d.get("text") for d in (rv.data if rv else [])]
+
+
+def tap_picker_row(popup, text):
+    """Bir hareket secici satirina 'dokunmayi' simule eder - eslesen
+    rv.data ogesinin 'on_release' geri cagirimini dogrudan cagirir (gercek
+    bir Button.dispatch('on_release') ile AYNI kod yolunu tetikler, bkz.
+    main.py._PickerRow.on_release)."""
+    rv = _find_picker_rv(popup)
+    assert rv is not None, "picker RecycleView not found"
+    for d in rv.data:
+        if d.get("text") == text:
+            d["on_release"]()
+            return
+    raise AssertionError(f"picker row {text!r} not found in rv.data")
 
 print("root:", root)
 print("children:", root.children)
@@ -151,10 +188,12 @@ def step_expanded_exercise_library_is_wired_up():
     assert "Trapez" in core.MUSCLE_GROUPS, "Trapez muscle group missing"
     assert core.MUSCLE_GROUP_DEFAULTS.get("Barbell Shrug") == ["Trapez"], \
         "Barbell Shrug should map to Trapez"
-    # Every button actually rendered in the picker must be a real, clickable
-    # exercise name pulled from the (now much larger) library - not stale UI.
-    shrug_btn = find_text(popup, "Barbell Shrug")
-    assert shrug_btn is not None, "Barbell Shrug not rendered in picker"
+    # Every row wired into the picker's RecycleView data must be a real,
+    # tap-able exercise name pulled from the (now much larger) library - not
+    # stale UI. (Task 17: only visible rows are ever instantiated as actual
+    # Button widgets, so we check the data feeding the list, not the widget
+    # tree - see tap_picker_row()/picker_texts() above.)
+    assert "Barbell Shrug" in picker_texts(popup), "Barbell Shrug not wired into picker data"
     # close this picker without selecting, so later steps get a clean popup
     for w in list(Window.children):
         if isinstance(w, Popup):
@@ -191,26 +230,26 @@ def step_search_filters_exercise_list():
     assert len(search_widgets) == 1, f"expected exactly one search TextInput, got {len(search_widgets)}"
     search = search_widgets[0]
 
-    def exercise_buttons():
-        return [w for w in popup.walk() if isinstance(w, Button)]
-
-    before = exercise_buttons()
+    # Task 17: the filtered list lives in the picker RecycleView's `data`,
+    # not as one real Button per match (see picker_texts() above) - only
+    # visible rows are ever instantiated as widgets.
+    before = picker_texts(popup)
     assert len(before) >= 217, f"expected full list before typing, got {len(before)}"
 
     search.text = "Barbell Shrug"
     Clock.tick()
-    matches = [w for w in exercise_buttons() if w.text == "Barbell Shrug"]
+    matches = [n for n in picker_texts(popup) if n == "Barbell Shrug"]
     assert matches, "typing an exact name should surface it in the filtered list"
-    others = [w for w in exercise_buttons() if w.text != "Barbell Shrug"]
+    others = [n for n in picker_texts(popup) if n != "Barbell Shrug"]
     assert not others, f"search should filter OUT non-matching exercises, {len(others)} left over"
 
     search.text = "zzz-no-such-exercise-zzz"
     Clock.tick()
-    assert exercise_buttons() == [], "an unmatched query should show zero exercise buttons"
+    assert picker_texts(popup) == [], "an unmatched query should show zero exercise rows"
 
     search.text = ""
     Clock.tick()
-    after = exercise_buttons()
+    after = picker_texts(popup)
     assert len(after) == len(before), "clearing the search box should restore the full list"
 
     popup.dismiss(animation=False)
@@ -238,10 +277,10 @@ def step_hedef_back_button_returns_to_picker():
     # hareket listesini actigini dogruluyor.
     popup = top_popup()
     assert popup is not None, "picker popup not found"
-    first_btn = next((w for w in popup.walk() if isinstance(w, Button)), None)
-    assert first_btn is not None, "no exercise buttons in picker"
-    picked_name = first_btn.text
-    click(first_btn)
+    items = picker_texts(popup)
+    assert items, "no exercise rows in picker"
+    picked_name = items[0]
+    tap_picker_row(popup, picked_name)
     # Hedef popup artik dismiss()'ten bir Clock karesi SONRA aciliyor (bkz.
     # pick() icindeki Clock.schedule_once(open_next, 0)) - araya bilerek
     # sokulan kare sinirini burada Clock.tick() ile geciyoruz.
@@ -282,10 +321,10 @@ def step_actually_save_one_exercise_for_edit_test():
     Clock.tick()
     popup = top_popup()
     assert popup is not None, "picker popup not found"
-    first_btn = next((w for w in popup.walk() if isinstance(w, Button)), None)
-    assert first_btn is not None, "no exercise buttons in picker"
-    name_to_save = first_btn.text
-    click(first_btn)
+    items = picker_texts(popup)
+    assert items, "no exercise rows in picker"
+    name_to_save = items[0]
+    tap_picker_row(popup, name_to_save)
     Clock.tick()  # Hedef popup bir kare sonra acilir (bkz. KOK NEDEN 3)
 
     hedef_popup = top_popup("Hedef")
@@ -362,15 +401,11 @@ def step_picking_via_focused_search_waits_for_window_resize():
     full_w, full_h = Window.size
     Window.size = (full_w, full_h - 300)  # "klavye acildi, pencere kucüldu"
 
-    # NOT: find_text() burada kullanilamaz - search.text de ayni degere
-    # esit oldugu icin (TextInput'in de bir .text ozelligi var) yanlislikla
-    # arama kutusunun kendisini bulup ona click() (on_press dispatch)
-    # yapmaya calisir, bu da TextInput'ta boyle bir event olmadigindan
-    # KeyError('on_press') ile patlar. Sadece gercek Button'lari ariyoruz.
-    match_btn = next((w for w in popup.walk()
-                       if isinstance(w, Button) and w.text == "Ab Wheel Rollout"), None)
-    assert match_btn is not None, "expected exact-match exercise button"
-    click(match_btn)
+    # Task 17: picker satirlari artik rv.data uzerinden - tap_picker_row()
+    # gercek bir dokunmanin tetikleyecegi AYNI on_release callback'ini
+    # cagirir (bkz. bu dosyanin basindaki tap_picker_row() notu).
+    assert "Ab Wheel Rollout" in picker_texts(popup), "expected exact-match exercise row"
+    tap_picker_row(popup, "Ab Wheel Rollout")
 
     # Picker popup'i ANINDA kapanmali (animasyonsuz).
     assert top_popup() is popup or top_popup() is None
@@ -420,10 +455,8 @@ def step_picking_via_focused_search_has_safety_net_timeout():
     full_w, full_h = Window.size
     Window.size = (full_w, full_h - 300)  # klavye "acik" kalsin, hic kapanmayacak
 
-    match_btn = next((w for w in popup.walk()
-                       if isinstance(w, Button) and w.text == "Arnold Press"), None)
-    assert match_btn is not None
-    click(match_btn)
+    assert "Arnold Press" in picker_texts(popup)
+    tap_picker_row(popup, "Arnold Press")
     Clock.tick()
     assert top_popup("Hedef") is None, "resize gelmeden hemen acilmamali"
 
@@ -459,9 +492,8 @@ def step_pick_first_exercise_and_open_target_editor():
     assert popup is not None, "picker popup not found"
     names = core.all_exercise_names(app.state)
     first_name = sorted(names)[0]
-    btn = next((w for w in popup.walk() if isinstance(w, Button) and w.text == first_name), None)
-    assert btn is not None, f"exercise button {first_name!r} not found"
-    click(btn)
+    assert first_name in picker_texts(popup), f"exercise row {first_name!r} not found"
+    tap_picker_row(popup, first_name)
     # Hedef popup artik bir Clock karesi sonra aciliyor (bkz. KOK NEDEN 3).
     Clock.tick()
 
@@ -547,9 +579,8 @@ def step_add_adhoc_exercise_during_session():
     assert popup is not None, "Hareket Ekle popup not found"
     names = core.all_exercise_names(app.state)
     other_name = sorted(names)[1]
-    btn2 = find_text(popup, other_name)
-    assert btn2 is not None, f"button for {other_name!r} not found"
-    click(btn2)
+    assert other_name in picker_texts(popup), f"row for {other_name!r} not found"
+    tap_picker_row(popup, other_name)
 
 safe("add adhoc exercise during session", step_add_adhoc_exercise_during_session)
 

@@ -31,6 +31,9 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.widget import Widget
+from kivy.uix.recycleview import RecycleView
+from kivy.uix.recycleboxlayout import RecycleBoxLayout
+from kivy.uix.recycleview.views import RecycleDataViewBehavior
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.utils import platform
@@ -381,6 +384,48 @@ class ClickableRow(ButtonBehavior, BoxLayout):
     pass
 
 
+class _PickerRow(RecycleDataViewBehavior, Button):
+    """Hareket secici (_build_exercise_picker, Task 17) icin RecycleView satir
+    gorunumu.
+
+    KOK NEDEN / DUZELTME (bkz. _build_exercise_picker basindaki KOK NEDEN
+    notu): eski kod, arama/filtre her degistiginde eslesen HER hareket icin
+    (217'ye kadar) ayri bir Button nesnesi olusturuyordu. RecycleView bunun
+    yerine bu sinifin SINIRLI sayida (yalnizca o an EKRANDA GORUNEN + kucuk
+    bir tampon kadar) ornegini olusturup kaydirma sirasinda AYNI ornaklari
+    YENIDEN KULLANIR (sadece .text ve tiklama geri cagirimini degistirir) -
+    217 satirin tamami icin degil, gorunen ~10-15 satir icin widget kurulur.
+
+    Gorunum/stil (RAISED zemin, TEXT renk, dp(38) yukseklik, Button'in
+    varsayilan fontu) RecycleView-ONCESI koddaki satir Button'i ile BIREBIR
+    AYNI - degisen sadece somutlastirma stratejisi, davranis/gorunum degil.
+    """
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.background_normal = ""
+        self.background_down = ""
+        self.background_color = RAISED
+        self.color = TEXT
+        self.size_hint_y = None
+        self.height = dp(38)
+        self._pick_cb = None
+
+    def refresh_view_attrs(self, rv, index, data):
+        # NOT: data'daki 'on_release' anahtarini KASITLI olarak super()'a
+        # AKTARMIYORUZ - o gercek bir Kivy ozelligi degil (Button'da bir
+        # EVENT), RecycleDataViewBehavior'un varsayilan otomatik-setattr
+        # mekanizmasina verilirse hataya yol acar. Callback'i kendimiz
+        # saklayip asagidaki on_release()'te elle cagiriyoruz.
+        self._pick_cb = data.get("on_release")
+        self.text = data.get("text", "")
+        return super().refresh_view_attrs(rv, index, {})
+
+    def on_release(self):
+        if self._pick_cb is not None:
+            self._pick_cb()
+
+
 import re
 _DAY_NAME_RE = re.compile(r'^\s*(\d+)\s*\.\s*G[üu]n\s*:\s*(.+?)\s*(?:\(([^)]*)\))?\s*$', re.IGNORECASE)
 def parse_day_name(name):
@@ -696,26 +741,56 @@ class ProgramScreen(Screen):
 
             names_sorted = sorted(core.all_exercise_names(app.state))
 
-            scroll = ScrollView()
-            col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(4))
-            col.bind(minimum_height=col.setter("height"))
-            scroll.add_widget(col)
-            content.add_widget(scroll)
+            # Task 17 (217 elemanli listede performans - "sadece gorunen
+            # satirlar somutlastirilsin"): eskiden burada arama/filtre HER
+            # degistiginde eslesen HER hareket icin ayri bir Button nesnesi
+            # olusturuluyordu (yukaridaki fonksiyon-basi KOK NEDEN notundaki
+            # "donma hissi" ile ayni kok sebep - sadece ilk acilista degil,
+            # HER tus vurusunda tekrarlaniyordu). RecycleView'e gecildi:
+            # _PickerRow'un SINIRLI sayida (sadece ekranda gorunen + kucuk
+            # bir tampon kadar) ornegi olusturulup kaydirma sirasinda AYNI
+            # orneklar YENIDEN KULLANILIR - artik arama kutusuna her harf
+            # yazildiginda 217 degil, sadece rv.data (hafif dict listesi)
+            # degisiyor; gercek Button widget'lari sadece kaydirilarak
+            # GORUNUR hale geldikce kurulur. Davranis (arama-yaz-filtrele,
+            # dokunup-sec, bos sonuc mesaji) BIREBIR AYNI kaldi.
+            rv = RecycleView(size_hint=(1, 1))
+            rv.viewclass = _PickerRow
+            rv_layout = RecycleBoxLayout(
+                orientation="vertical", size_hint_y=None, spacing=dp(4),
+                default_size=(None, dp(38)), default_size_hint=(1, None),
+            )
+            rv_layout.bind(minimum_height=rv_layout.setter("height"))
+            rv.add_widget(rv_layout)
 
             empty_lbl = label("Sonuç bulunamadı.", color=MUTED, halign="center", height=dp(60))
 
             def refresh(query):
-                col.clear_widgets()
                 q = query.strip().lower()
                 matches = [n for n in names_sorted if q in n.lower()] if q else names_sorted
                 if not matches:
-                    col.add_widget(empty_lbl)
+                    # bos sonuc: listeyi (rv) kaldirip mesaji goster - eski
+                    # kodda ayni gorsel sonuc col.add_widget(empty_lbl) ile
+                    # elde ediliyordu.
+                    if rv.parent is content:
+                        content.remove_widget(rv)
+                    if empty_lbl.parent is None:
+                        content.add_widget(empty_lbl)
                     return
-                for n in matches:
-                    b = Button(text=n, size_hint_y=None, height=dp(38), background_normal="",
-                               background_down="", background_color=RAISED, color=TEXT)
+                if empty_lbl.parent is content:
+                    content.remove_widget(empty_lbl)
+                if rv.parent is None:
+                    content.add_widget(rv)
 
-                    def pick(*_a, name=n):
+                def make_pick(name):
+                    # KOK NEDEN NOTU: bu fabrika fonksiyonu, eski koddaki
+                    # "def pick(*_a, name=n):" varsayilan-parametre hilesinin
+                    # (dongudeki gec-baglanma/late-binding tuzagini onlemek
+                    # icin) RecycleView data-listesi bağlaminda karsiligidir -
+                    # her make_pick(n) cagrisi KENDI izole "name" degiskenine
+                    # sahip yeni bir pick() dondurur, tipki eskisi gibi HER
+                    # satirin DOGRU hareket adiyla eslesmesini garanti eder.
+                    def pick():
                         # KOK NEDEN 1 (dogrudan tiklamada da olan eski kayma):
                         # normal (animasyonlu) dismiss ~0.25sn boyunca solarak
                         # kapanir - bu sure icinde on_pick(name) HEMEN yeni bir
@@ -793,8 +868,9 @@ class ProgramScreen(Screen):
                         Window.bind(on_resize=on_resize_cb)
                         Clock.schedule_once(proceed, 1.5)  # guvenlik agi
 
-                    b.bind(on_release=pick)
-                    col.add_widget(b)
+                    return pick
+
+                rv.data = [{"text": n, "on_release": make_pick(n)} for n in matches]
 
             search.bind(text=lambda _w, val: refresh(val))
             refresh("")
