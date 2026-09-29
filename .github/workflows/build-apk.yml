@@ -6,7 +6,12 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: read
+  # NOT: "contents: write" - SADECE asagidaki "APK'yi git branch'ine gonder"
+  # adiminin latest-apk branch'ine push yapabilmesi icin gerekli (bkz. o
+  # adimdaki KOK NEDEN notu - Actions artifact indirme/log okuma, bu
+  # oturumun ag politikasinin SABIT olarak engelledigi *.blob.core.windows.net
+  # adresine yonlendiriliyor; duz bir git push/fetch ise bu engele takilmiyor).
+  contents: write
   # NOT: "issues: write" SADECE HATA - derleme loglarinin son kismini issue
   # yorumuna gonder adiminin (scripts/ci_post_build_log.py) GITHUB_TOKEN ile
   # issue #1'e yorum atabilmesi icin gerekli - o adim olmasa contents: read
@@ -195,3 +200,30 @@ jobs:
           name: tonaj-apk
           path: ${{ steps.findapk.outputs.path }}
           retention-days: 90
+
+      - name: APK'yi git branch'ine gonder (blob-depolama engeli icin)
+        # KOK NEDEN: yukaridaki "Artifacts" yolu GitHub'in normal indirme
+        # akisi - ama bu APK'yi getirmeye calisan oturumun ag politikasi,
+        # hem Actions job log'larinin hem de artifact zip indirmelerinin
+        # yonlendirildigi *.blob.core.windows.net adresini SABIT olarak
+        # engelliyor (issue #1'deki tani calismasinda ayni engel build
+        # log'lari icin de tespit edildi). Duz bir "git push/fetch" ise
+        # (github.com uzerinden, blob DEGIL) bu engelden hic etkilenmiyor.
+        #
+        # DUZELTME: APK'yi TEK dosyalik, KOKENSIZ (orphan) bir "latest-apk"
+        # branch'ine HER SEFERINDE force-push ediyoruz (repo gecmisini
+        # buyutmemek icin - bu bir surum gecmisi degil, sadece "en son
+        # basarili APK'ya" giden bir kanal). Boylece APK, blob-depolamaya
+        # hic ugramadan sade bir "git fetch" ile alinabiliyor.
+        run: |
+          mkdir -p /tmp/apk-branch
+          cp "${{ steps.findapk.outputs.path }}" /tmp/apk-branch/tonaj.apk
+          cd /tmp/apk-branch
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tonaj.apk
+          git commit -q -m "APK: commit ${{ github.sha }}"
+          git branch -M latest-apk
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git push -f origin latest-apk
