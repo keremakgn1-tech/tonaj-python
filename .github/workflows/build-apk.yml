@@ -154,37 +154,15 @@ jobs:
         # runner'dan (bizim proxy'mizden GECMEDEN) bir issue yorumu olarak
         # gonderiyoruz, boylece hatayi buradan okuyabiliyoruz.
         if: failure()
-        run: |
-          python3 - <<'PYEOF'
-          import json, subprocess, urllib.request, os
-
-          log_path = "/tmp/build.log"
-          try:
-              with open(log_path, "r", errors="replace") as f:
-                  lines = f.readlines()
-          except FileNotFoundError:
-              lines = ["(build.log bulunamadi - docker adimi loga ulasamadan mi patladi?)\n"]
-
-          tail = "".join(lines[-150:])
-          sha = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
-          run_url = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
-          body = f"### Derleme basarisiz - commit {sha}\nRun: {run_url}\n\n```\n{tail}\n```\n"
-
-          repo = os.environ["GITHUB_REPOSITORY"]
-          url = f"https://api.github.com/repos/{repo}/issues/1/comments"
-          req = urllib.request.Request(
-              url,
-              data=json.dumps({"body": body}).encode("utf-8"),
-              method="POST",
-              headers={
-                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
-                  "Accept": "application/vnd.github+json",
-                  "Content-Type": "application/json",
-              },
-          )
-          with urllib.request.urlopen(req) as resp:
-              print(resp.status, resp.read().decode())
-          PYEOF
+        # NOT: bu adimin komutu KASITLI olarak tek bir dosyaya (scripts/ci_post_build_log.py)
+        # yazildi, YAML "run: |" blogunun icine gomulu bir python heredoc'u OLARAK DEGIL -
+        # ilk denemede tam da bu heredoc yaklasimi kullanilmisti ve YAML'in blok
+        # girintisini (indentation) heredoc govdesine oldugu gibi tasimasi yuzunden
+        # ureteceleri python kodu satir basi girintili (indented) top-level ifadelere
+        # donusuyordu -> "IndentationError" ile bu tani adiminin KENDISI sessizce
+        # basarisiz oluyordu (build.log'daki asil hatayi hic goremeden). Ayri bir .py
+        # dosyasi calistirmak bu sinif hatayi tamamen ortadan kaldirir.
+        run: python3 scripts/ci_post_build_log.py
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
