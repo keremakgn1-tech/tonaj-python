@@ -7,6 +7,15 @@ on:
 
 permissions:
   contents: read
+  # NOT: "issues: write" SADECE HATA - derleme loglarinin son kismini issue
+  # yorumuna gonder adiminin (scripts/ci_post_build_log.py) GITHUB_TOKEN ile
+  # issue #1'e yorum atabilmesi icin gerekli - o adim olmasa contents: read
+  # yeterli olurdu. Bu izin olmadan POST /issues/1/comments 403 doner (bu,
+  # tam da bu tani adiminin kendisinin sessizce basarisiz olmasina sebep
+  # olan 2. hataydi - 1.si heredoc/IndentationError'du, ikisi de ayni run'da
+  # ayni "step failed" gorunumunu verdigi icin Checks API annotation'lari
+  # bunu ayirt etmedi, sadece "exit code 1" dedi).
+  issues: write
 
 jobs:
   build-apk:
