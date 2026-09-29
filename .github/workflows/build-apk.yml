@@ -114,6 +114,25 @@ jobs:
           restore-keys: |
             buildozer-
 
+      - name: Buildozer'in resmi Docker imajiyla APK derle icin diskte yer ac
+        # KOK NEDEN (bu commit'te eklenen UI duman testi adimlari icin
+        # kurulan xvfb/libsdl2/Kivy paketleri, runner'in zaten SINIRLI olan
+        # diskini - ghcr.io/kivy/buildozer imaji + .buildozer cache'i +
+        # Android SDK/NDK indirmeleriyle zaten dolu - yeterince ITTI ve
+        # docker'in cok-GB'lik buildozer imajini CEKME/ACMA asamasinda
+        # "no space left on device" ile ANINDA (~100-150sn'de, normalde
+        # 13-15dk suren bir derlemenin cok altinda) patlamasina sebep oldu):
+        # runner'daki onceden kurulu, bu is icin GEREKSIZ buyuk paketleri
+        # (Android Studio/SDK, .NET, Haskell, buyuk docker imaj onbellekleri)
+        # buildozer imajini cekmeden ONCE silerek birkac GB yer aciyoruz.
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL \
+                       /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                       /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          docker image prune -af || true
+          df -h /
+
       - name: Buildozer'in resmi Docker imajiyla APK derle
         run: |
           mkdir -p .ci-cache/android-home
