@@ -452,12 +452,25 @@ def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
         refresh()
 
     def make_hold(delta):
+        # KOK NEDEN: Android'de bazi dokunuşlarda on_press iki kez, arada
+        # on_release gelmeden art arda tetiklenebiliyor (dokunma/focus
+        # glitch'i). Eskiden start() her cagrildiginda ev[0]'i kosulsuz
+        # üzerine yaziyordu; ikinci on_press, ilk cagrida baslatilan
+        # Clock.schedule_interval'in referansini kaybettiriyordu. O ilk
+        # interval hicbir zaman cancel edilemedigi icin sonsuza kadar
+        # calismaya devam ediyor, deger parmak cekildikten sonra bile
+        # durmadan artiyordu ("takildi" hatasi, video ile bildirildi).
+        # DUZELTME: start() artik idempotent - zaten calisan bir interval
+        # varsa ikinci on_press hicbir sey yapmiyor (no-op), boylece asla
+        # ikinci bir interval planlanip ilkinin referansi kaybolmuyor.
         ev = [None]
 
         def _tick(*_):
             apply_delta(delta)
 
         def start(*_):
+            if ev[0] is not None:
+                return
             apply_delta(delta)
             ev[0] = Clock.schedule_interval(_tick, 0.12)
 

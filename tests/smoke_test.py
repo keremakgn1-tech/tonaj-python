@@ -1215,6 +1215,48 @@ safe("fit_popup_to_content recovers after window shrinks (keyboard) and restores
      step_fit_popup_to_content_recovers_after_window_shrinks_and_restores)
 
 
+def step_stepper_double_press_does_not_leak_repeat_timer():
+    # KOK NEDEN: kullanicidan gelen video, "+" tusuna basili tutmadan bile
+    # agirlik degerinin sonsuza kadar artmaya devam ettigini gosterdi
+    # (500 -> 515 -> 530 -> 557.5 kg, ~3 saniyede). Gercek cihazda bazen
+    # bir dokunus on_press'i arada bir on_release olmadan iki kez
+    # tetikleyebiliyor (dokunma/focus glitch'i). Eski make_hold() kodu
+    # start()'i kosulsuz calistiriyordu; ikinci on_press, ilk cagridaki
+    # Clock.schedule_interval referansini (ev[0]) uzerine yaziyor, o ilk
+    # interval bir daha asla iptal edilemedigi icin sonsuza kadar calisip
+    # degeri artirmaya devam ediyordu - tek bir on_release sadece IKINCI
+    # (son kaydedilen) interval'i iptal ediyordu.
+    #
+    # Bu adim make_stepper()'i dogrudan (ekran akisindan bagimsiz) test
+    # ederek bu senaryoyu yeniden uretir: iki on_press, sonra sadece BIR
+    # on_release, sonra daha fazla Clock.tick() - deger duzeltmeden ONCE
+    # artmaya devam ederdi, duzeltmeden SONRA durmasi gerekir.
+    from shared import make_stepper
+
+    stepper = make_stepper("Test", 10, step=2.5, decimals=True)
+    row = stepper.children[0]
+    plus = row.children[0]
+    assert plus.text == "+", f"beklenen '+' butonu, bulunan: {plus.text!r}"
+
+    plus.dispatch("on_press")
+    plus.dispatch("on_press")
+    for _ in range(15):
+        Clock.tick()
+    plus.dispatch("on_release")
+    value_after_release = stepper.value
+
+    for _ in range(15):
+        Clock.tick()
+    assert stepper.value == value_after_release, (
+        f"on_release sonrasi deger hala artmaya devam ediyor "
+        f"({value_after_release} -> {stepper.value}) - ikinci on_press, "
+        f"ilk Clock.schedule_interval'i sizdirdi (leak). Bkz. "
+        f"shared.make_stepper() icindeki make_hold() 'KOK NEDEN' notu.")
+
+safe("stepper: art arda gelen on_press (on_release'siz) tekrar zamanlayicisini sizdirmiyor",
+     step_stepper_double_press_does_not_leak_repeat_timer)
+
+
 print()
 print("=" * 60)
 if errors:

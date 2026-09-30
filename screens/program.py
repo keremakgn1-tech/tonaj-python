@@ -809,8 +809,13 @@ class ProgramScreen(Screen):
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
             w_step = 2.5 if weight_unit() == "kg" else 5
             form = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
+            # max_val: sayaç mekanizmasında (make_stepper/make_hold) olası bir
+            # hatada bile deger anlamsiz seviyelere (500kg+) kacamasin diye
+            # ek bir güvenlik siniri - gercek dunya agirliklarinin cok
+            # üzerinde bir tavan.
+            w_max = 500 if weight_unit() == "kg" else 1100
             w_stepper = make_stepper(f"Ağırlık ({weight_unit()})", to_display_weight(_sw),
-                                      step=w_step, decimals=True)
+                                      step=w_step, decimals=True, max_val=w_max)
             r_stepper = make_stepper("Tekrar", ex.get("targetRepsMin"), step=1)
             form.add_widget(w_stepper)
             form.add_widget(r_stepper)
