@@ -171,19 +171,65 @@ def fit_popup_to_content(popup, content, extra=None, min_height=None, max_height
     Popup'un kendi yuksekligini content'in gercek ihtiyaci kadar (+ baslik
     cubugu/kenar bosluklari icin bir pay) ayarliyoruz - boylece popup da
     icerigi kadar kompakt gorunuyor, bos alan kalmiyor.
+
+    KOK NEDEN 2 (kullanicidan gelen GERCEK hata - Hedef popup'i, arama
+    kutusuyla hareket secilince, gunun geri kalan kartlariyla KALICI olarak
+    ust uste binmis/yanlis boyutlu goruntulendi, "bu sorun yeniden geri
+    geldi" diye bildirildi): cap = Window.height * max_height_frac SATIRI,
+    fit_popup_to_content() CAGRILDIGI ANDAKI Window.height degerini
+    kullaniyordu - SADECE O ANLIK. _build_exercise_picker()'daki arama
+    kutusu + klavye akisinda (bkz. oradaki KOK NEDEN 2/3 notlari), Hedef
+    popup'i acilmadan once Window'un klavye kapanip TAM yuksekligine
+    donmesini BEKLEYEN ozel bir mantik VAR - ama gercek cihazlarda pencere
+    yeniden boyutlandirma bazen tek bir sicramada degil, ARA KARELERLE
+    (kismen kuculup tekrar tam boya donen) gerceklesebiliyor; bekleme
+    mantigimizin "Window.height >= full_window_height - dp(2)" kontrolu
+    boyle bir ARA karede erken/yanlislikla tetiklenirse, fit_popup_to_content
+    HALA kuculmus bir Window.height'e gore cap hesaplayip popup'i OLMASI
+    GEREKENDEN KUCUK sabitliyordu - content.minimum_height DEGISMEDIGI
+    surece (ki degismez, icerik ayni kaldi) bu yanlis boyut BIR DAHA HIC
+    DUZELMIYORDU (yalnizca content.bind(minimum_height=update) VARDI,
+    Window boyutu tekrar tam boyuna donse bile update() BIR DAHA
+    CAGRILMIYORDU). Sonuc: popup kalici olarak yanlis/kucuk boyutta
+    aciliyor, ustunde/altinda arka plandaki (gunun diger hareket
+    satirlari, SIRADA rozeti vb.) icerik surekli gorunur kaliyordu -
+    yalnizca gecici bir "kayma" degil, KAPANMADAN kalici bir yanlis
+    boyuttu. Standalone bir tani script'iyle dogrulandi: Window kucultulup
+    fit_popup_to_content cagrilinca popup.height kucuk bir degere
+    sabitleniyor, Window sonradan tam boyuna donse BILE popup.height HIC
+    degismiyordu.
+
+    DUZELTME: update() artik SADECE content.minimum_height degisince degil,
+    Window'un kendi 'size' ozelligi her degistiginde de (ör. klavye kapanip
+    pencere tam yuksekligine donunce) YENIDEN calisiyor - boylece popup'in
+    boyutu, ne zaman olusturulmus olursa olsun, Window'un GERCEK/GUNCEL
+    boyutuna gore SURDUREBILIR sekilde dogru kaliyor. Bu, yukaridaki
+    Window.on_resize-bekleme mantigini GEREKSIZ kilmiyor (o hala erken
+    acilmayi ONLEMEYE calisan ilk savunma hatti) ama artik o mantik
+    herhangi bir sebeple erken/yanlis tetiklense BILE, bu ikinci savunma
+    hatti popup'i kalici olarak yanlis boyutta birakmiyor.
     """
     if extra is None:
         extra = dp(72)  # Popup'un kendi baslik cubugu + ayirici + kenar boslugu payi
     if min_height is None:
         min_height = dp(120)
 
+    from kivy.core.window import Window as _W
+
     def update(*_):
-        from kivy.core.window import Window as _W
         target = content.height + extra
         cap = _W.height * max_height_frac
         popup.height = max(min_height, min(target, cap))
 
+    def on_popup_dismiss(*_):
+        # Popup kapaninca Window'a kalici bir baglanti birakmayalim -
+        # aksi halde her acilan/kapanan Hedef/onay popup'i icin _W.bind
+        # birikip (hicbir zaman unbind edilmeyen) bir "sizinti" olustururdu.
+        _W.unbind(size=update)
+
     content.bind(minimum_height=update)
+    _W.bind(size=update)
+    popup.bind(on_dismiss=on_popup_dismiss)
     update()
 
 

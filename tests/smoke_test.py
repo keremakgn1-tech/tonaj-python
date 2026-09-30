@@ -1023,6 +1023,74 @@ def step_settings_reset_confirm_popup():
 safe("settings: open reset confirm popup", step_settings_reset_confirm_popup)
 
 
+def step_fit_popup_to_content_recovers_after_window_shrinks_and_restores():
+    # KOK NEDEN DUZELTMESI (kullanicidan gelen GERCEK hata - Hareket Seç
+    # popup'inda arama kutusu kullanip bir hareket sectikten sonra Hedef
+    # popup'i, gunun diger kartlariyla KALICI olarak ust uste binmis/yanlis
+    # boyutlu acildi, "bu sorun yeniden geri geldi" diye bildirildi):
+    # shared.fit_popup_to_content(), cagrildigi ANDAKI Window.height'e gore
+    # bir "cap" (ust sinir) hesaplayip popup'in yuksekligini SADECE
+    # content.minimum_height degisince guncelliyordu. Android'de arama
+    # kutusuna dokununca acilan klavye Window'u kucultuyor (adjustResize);
+    # eger (gercek cihazlarda dogrulanan bir zamanlama sartinda) Hedef
+    # popup'i klavye TAM kapanip Window TAM yuksekligine donmeden ONCE
+    # olusturulursa, cap kucuk bir Window.height'e gore hesaplaniyor ve
+    # icerik degismedigi surece BIR DAHA DUZELMIYORDU - Window sonradan
+    # tam boyuna donse bile. Duzeltme: fit_popup_to_content artik Window'un
+    # 'size' degisimini de dinliyor, boylece popup'in boyutu her zaman
+    # Window'un GUNCEL boyutuna gore doğru kaliyor - popup ne zaman
+    # olusturulmus olursa olsun.
+    from kivy.uix.boxlayout import BoxLayout
+    from kivy.uix.label import Label
+    from kivy.metrics import dp
+    from shared import fit_popup_to_content
+
+    # NOT: shared.label() kendi texture_size'ina gore yuksekligini OTOMATIK
+    # yeniden ayarliyor (bkz. o fonksiyondaki KOK NEDEN notu) - burada
+    # ONGORULEBILIR/SABIT bir icerik yuksekligi lazim, o yuzden bilerek
+    # duz bir Label (sabit height=dp(58)) kullaniyoruz.
+    content = BoxLayout(orientation="vertical", size_hint_y=None)
+    content.bind(minimum_height=content.setter("height"))
+    for _ in range(8):
+        content.add_widget(Label(text="satır", size_hint_y=None, height=dp(58)))
+
+    popup = Popup(title="Test", content=content, size_hint=(0.9, None))
+    popup.open(animation=False)
+    for _ in range(3):
+        Clock.tick()
+
+    full_height = Window.height
+    # Klavye acilmis gibi Window'u kucult (Android'in adjustResize'i).
+    Window.size = (Window.width, int(Window.height * 0.55))
+    for _ in range(3):
+        Clock.tick()
+
+    # Hedef popup'i (bizim testimizdeki bu popup), klavye TAM kapanmadan
+    # (Window HALA kucukken) olusturulmus/boyutlandirilmis gibi simule et.
+    fit_popup_to_content(popup, content)
+    for _ in range(2):
+        Clock.tick()
+    shrunk_height = popup.height
+    assert shrunk_height < content.height, (
+        "test kurulumu gecersiz: popup, Window kucukken icerige sigacak "
+        "kadar buyuk kalmis - kucultme testi anlamsizlasir")
+
+    # Klavye kapanip Window tam yuksekligine donuyor.
+    Window.size = (Window.width, full_height)
+    for _ in range(3):
+        Clock.tick()
+
+    assert popup.height > shrunk_height, (
+        f"Window tam yuksekligine donduktan SONRA popup.height hala "
+        f"kucuk kaldi ({popup.height}) - fit_popup_to_content Window "
+        f"resize'ina tepki vermiyor (bkz. bu testin ustundeki KOK NEDEN "
+        f"notu, shared.fit_popup_to_content 'KOK NEDEN 2')")
+    popup.dismiss(animation=False)
+
+safe("fit_popup_to_content recovers after window shrinks (keyboard) and restores",
+     step_fit_popup_to_content_recovers_after_window_shrinks_and_restores)
+
+
 print()
 print("=" * 60)
 if errors:
