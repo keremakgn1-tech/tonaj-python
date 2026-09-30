@@ -194,6 +194,33 @@ def step_expanded_exercise_library_is_wired_up():
     # Button widgets, so we check the data feeding the list, not the widget
     # tree - see tap_picker_row()/picker_texts() above.)
     assert "Barbell Shrug" in picker_texts(popup), "Barbell Shrug not wired into picker data"
+
+    # KOK NEDEN DUZELTMESI (kullanicidan gelen GERCEK hata - "Hareketlerin
+    # hiçbiri yok", ekran goruntusunde arama kutusunun altinda TEK bir
+    # hareket bile gorunmuyordu): rv.data dolu olmasi TEK BASINA yeterli
+    # DEGIL - screens/program.py'de rv.viewclass, rv.add_widget(rv_layout)
+    # CAGRISINDAN ONCE atanmisti; viewclass bir AliasProperty ve setter'i
+    # "layout_manager varsa ata" seklinde calisiyor (bkz.
+    # kivy/uix/recycleview/__init__.py RecycleView._set_viewclass) -
+    # layout_manager SADECE rv_layout eklenince olusuyor, o yuzden erken
+    # atama SESSIZCE hicbir sey yapmiyordu ve HICBIR satir widget'i
+    # kurulmuyordu (rv.data'nin kendisi dolu olsa, minimum_height/kaydirma
+    # cubugu dogru hesaplansa BILE). Bu, GERCEK cihazda VE bu xvfb tabanli
+    # testte AYNI sekilde ortaya cikan, ortam-bagimsiz bir sira hatasiydi.
+    # Duzeltildikten sonra burada GERCEKTEN kurulan Button sayisini
+    # DOGRUDAN sayarak bu hata sinifinin bir daha sessizce geri
+    # gelmemesini garantiliyoruz - rv.data kontrolu tek basina bunu
+    # yakalayamazdi.
+    rv = _find_picker_rv(popup)
+    rv_layout = rv.layout_manager
+    assert rv_layout is not None, "picker RecycleView'inin bir layout_manager'i olmali"
+    for _ in range(5):
+        Clock.tick()
+    assert len(rv_layout.children) > 0, (
+        "Hareket secici RecycleView'i hicbir GERCEK satir widget'i "
+        "kurmadi - rv.viewclass muhtemelen add_widget(rv_layout)'tan ONCE "
+        "atanmis (bkz. bu testin ustundeki KOK NEDEN notu)")
+
     # close this picker without selecting, so later steps get a clean popup
     for w in list(Window.children):
         if isinstance(w, Popup):
@@ -689,9 +716,9 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
 
     # NOT (bkz. _find_picker_rv/tap_picker_row'daki AYNI desen yukarida):
     # RecycleView SADECE o an EKRANDA GORUNEN satirlar icin gercek widget
-    # kurar - kucuk/tam boyutu belli olmayan bir headless test penceresinde
-    # bir satirin GERCEKTEN realize edilip edilmedigine guvenmek yerine,
-    # dogrudan rv.data uzerinden (asil veri kaynagi) dogruluyoruz.
+    # kurar - listenin geri kalani icin dogrudan rv.data uzerinden (asil
+    # veri kaynagi) dogruluyoruz, bu ayri bir gecerlilik sebebi (sadece
+    # gorunen satirlarin GERCEK widget olmasi zaten TASARIM geregi).
     rvs = [w for w in history_screen.walk() if isinstance(w, RecycleView)]
     assert len(rvs) == 1, "Gecmis ekraninda tam olarak bir RecycleView olmali"
     rv = rvs[0]
@@ -701,16 +728,27 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
     assert rv.data[0]["session"]["exercises"][0]["name"] == "Squat"
     assert rv.data[1]["session"]["exercises"][0]["name"] == "Bench Press"
 
-    # NOT (bu dosyadaki _find_picker_rv/tap_picker_row'daki AYNI notu -
-    # yukarida): RecycleView, bu headless/gercek dokunma-kaydirma olayi
-    # olmayan test ortaminda GERCEK satir widget'lari hic instantiate
-    # ETMEYEBILIR (kaydirma alani hesabi gercek bir touch/scroll event'ine
-    # bagli) - bu, bu test ortaminin bir sinirlamasi, KODUN kendisinde bir
-    # hata degil (gercek cihazda/CI'nin xvfb'sinde dogrulandigi gibi bu
-    # zaten calisan bir desendir, bkz. Task 17). O yuzden burada da (picker
-    # testlerindeki gibi) GERCEK widget aramak yerine rv.data uzerinden
-    # dogruluyoruz - render'in KENDISI degil, render'in DOGRU VERIYLE
-    # besledigi veri kaynagi test ediliyor.
+    # KOK NEDEN DUZELTMESI (kullanicidan gelen GERCEK hata - Hareket Seç
+    # popup'i tamamen bosti): daha once burada "RecycleView bu test
+    # ortaminda gercek satir widget'i hic kurmayabilir, bu KODUN degil
+    # ORTAMIN sinirlamasidir" yaziyordu - bu YANLIS bir teshisti. Gercek
+    # sebep, screens/program.py ve screens/history.py'de rv.viewclass'in
+    # rv.add_widget(rv_layout)'tan ONCE atanmasiydi: viewclass bir
+    # AliasProperty ve setter'i "layout_manager varsa ata" seklinde
+    # calisiyor (bkz. kivy/uix/recycleview/__init__.py) - layout_manager
+    # SADECE rv_layout eklenince olusuyor, o yuzden erken atama SESSIZCE
+    # hicbir sey yapmiyordu ve GERCEK cihazda da (bu test ortaminda da)
+    # HICBIR satir widget'i kurulmuyordu. Duzeltildikten sonra artik
+    # GERCEKTEN kurulan widget sayisini burada DOGRUDAN sayarak bu hata
+    # sinifinin bir daha sessizce geri gelmemesini garantiliyoruz.
+    rv_layout = rv.layout_manager
+    assert rv_layout is not None, "RecycleView'in bir layout_manager'i olmali"
+    for _ in range(5):
+        Clock.tick()
+    assert len(rv_layout.children) > 0, (
+        "Gecmis RecycleView'i hicbir GERCEK satir widget'i kurmadi - "
+        "rv.viewclass muhtemelen add_widget(rv_layout)'tan ONCE atanmis "
+        "(bkz. bu testin ustundeki KOK NEDEN notu)")
 
     # Silme akisi: "on_delete" geri cagirimini dogrudan cagiriyoruz - bu,
     # gercek bir Button.dispatch('on_release') ile AYNI kod yolu

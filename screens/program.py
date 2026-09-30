@@ -302,14 +302,38 @@ class ProgramScreen(Screen):
             # degisiyor; gercek Button widget'lari sadece kaydirilarak
             # GORUNUR hale geldikce kurulur. Davranis (arama-yaz-filtrele,
             # dokunup-sec, bos sonuc mesaji) BIREBIR AYNI kaldi.
+            # KOK NEDEN (kullanicidan gelen gercek hata - "Hareketlerin
+            # hiçbiri yok", Hareket Seç popup'i tamamen bos aciliyordu):
+            # rv.viewclass, Kivy'de bir AliasProperty - SETTER'i
+            # "self.layout_manager varsa ONA ata, yoksa hicbir sey yapma"
+            # seklinde calisiyor (bkz. kivy/uix/recycleview/__init__.py
+            # RecycleView._set_viewclass). rv.add_widget(rv_layout)
+            # CAGRILMADAN ONCE rv.layout_manager HENUZ YOK (RecycleView,
+            # layout_manager'i SADECE kendisine bir RecycleLayoutManagerBehavior
+            # COCUGU EKLENINCE otomatik atar). Yani "rv.viewclass = _PickerRow"
+            # SATIRI, rv_layout EKLENMEDEN once cagrilirsa SESSIZCE HICBIR
+            # SEY YAPMAZ - hata da vermez, sadece viewclass hep None kalir,
+            # RecycleDataAdapter hicbir gercek satir widget'i olusturamaz
+            # (rv.data dolu olsa, minimum_height/scrollbar dogru hesaplansa
+            # BILE - tam ekranda gordugumuz: arama kutusu var, altinda BOS,
+            # ince bir kaydirma cubugu var ama hic satir yok). Bu, GERCEK
+            # cihazda VE bu depodaki xvfb tabanli duman testinde AYNI sekilde
+            # tekrarlanan, ortam-bagimsiz gercek bir sira/mantik hatasiydi -
+            # daha once (yanlislikla) "RecycleView headless ortamda gercek
+            # widget kurmuyor" diye test-ortami sinirlamasi sanilmisti; asil
+            # sebep BUYMUS.
+            #
+            # DUZELTME: rv.viewclass ATANMASI, rv.add_widget(rv_layout)
+            # CAGRISINDAN SONRAYA tasindi - artik layout_manager zaten
+            # atanmisken viewclass gercekten layout_manager'a gecebiliyor.
             rv = RecycleView(size_hint=(1, 1))
-            rv.viewclass = _PickerRow
             rv_layout = RecycleBoxLayout(
                 orientation="vertical", size_hint_y=None, spacing=dp(4),
                 default_size=(None, dp(38)), default_size_hint=(1, None),
             )
             rv_layout.bind(minimum_height=rv_layout.setter("height"))
             rv.add_widget(rv_layout)
+            rv.viewclass = _PickerRow
 
             empty_lbl = label("Sonuç bulunamadı.", color=MUTED, halign="center", height=dp(60))
 

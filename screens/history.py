@@ -50,13 +50,23 @@ class HistoryScreen(Screen):
             self.add_widget(col)
             return
 
+        # KOK NEDEN / DUZELTME (kullanicidan gelen gercek hata, Hareket Seç
+        # popup'inda bulundu - bkz. screens/program.py _build_exercise_picker
+        # icindeki AYNI hatanin KOK NEDEN notu): rv.viewclass bir AliasProperty
+        # ve setter'i "layout_manager varsa ona ata" seklinde calisiyor;
+        # rv.add_widget(rv_layout) CAGRILMADAN ONCE layout_manager henuz
+        # atanmamis oldugu icin "rv.viewclass = ..." SESSIZCE hicbir sey
+        # yapmiyordu - bu ekran da (Gecmis) picker ile AYNI sirayi (once
+        # viewclass, sonra add_widget) kullandigi icin ayni sekilde
+        # etkileniyordu (kullanici henuz bildirmemis olsa da). Viewclass
+        # atamasi artik add_widget(rv_layout)'tan SONRA yapiliyor.
         rv = RecycleView(size_hint=(1, 1))
-        rv.viewclass = _HistorySessionRow
         rv_layout = RecycleBoxLayout(
             orientation="vertical", size_hint_y=None, spacing=dp(10), padding=dp(12),
         )
         rv_layout.bind(minimum_height=rv_layout.setter("height"))
         rv.add_widget(rv_layout)
+        rv.viewclass = _HistorySessionRow
 
         # Gecmis, en YENI oturum en ustte gorunecek sekilde (kullanicidan
         # gelen orijinal davranis) ters kronolojik sirada tutulmuyor olabilir
