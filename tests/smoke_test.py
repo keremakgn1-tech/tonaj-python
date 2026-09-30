@@ -57,6 +57,22 @@ def safe(step_name, fn):
 
 app = main.TonajApp()
 root = app.build()
+# KOK NEDEN (bu testin kendisindeki bir eksiklik - Gecmis ekranindaki genislik
+# hatasini arastirirken bulundu): normalde App.run() cagirdiginda Kivy
+# otomatik olarak Window.add_widget(root) yapar - boylece root'un (ve butun
+# alt agacinin) boyutu GERCEKTEN Window boyutuna baglanir. Bu duman testi
+# app.run() DEGIL sadece app.build() cagiriyor, yani root hicbir zaman
+# Window'a eklenmiyordu - root (ve ona bagli her sey) Kivy'nin varsayilan
+# widget boyutunda (100x100) KALIYORDU. Bugune kadarki testler bunu fark
+# etmedi cunku hicbiri GERCEK piksel genislik/boyut degeri kontrol etmiyordu
+# (hepsi metin/durum kontrolu ya da dogrudan on_press/on_release dispatch'i
+# kullaniyordu - gercek ekran koordinatlarina ihtiyaç duymuyordu). DUZELTME:
+# App.run()'in yaptigi ayni baglamayi burada da yapiyoruz, boylece testler
+# ARTIK gercek cihazdaki gibi Window boyutuna gore duzenlenen bir agac
+# uzerinde calisiyor - piksel genislik/yukseklik regresyonlarini (ornegin
+# bu oturumda bulunan Gecmis ekrani genislik hatasi) artik yakalayabiliyoruz.
+Window.add_widget(root)
+Window.size = Window.size  # boyutu HEMEN root'a yaymak icin resize tetikle
 
 def click(btn):
     # Simulate a real tap: dispatch press+release like Kivy would.
@@ -698,6 +714,7 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
     # akisinin (confirm popup -> onayla -> state'ten cikar) hala eskisi
     # gibi calistigini dogruluyoruz.
     from kivy.uix.recycleview import RecycleView
+    from kivy.metrics import dp
     from shared import history_card_height
 
     app.state["history"] = [
@@ -766,6 +783,22 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
         "Gecmis RecycleView'i hicbir GERCEK satir widget'i kurmadi - "
         "rv.viewclass muhtemelen add_widget(rv_layout)'tan ONCE atanmis "
         "(bkz. bu testin ustundeki KOK NEDEN notu)")
+    # KOK NEDEN DUZELTMESI (kullanicidan gelen ekran goruntusu - Gecmis
+    # ekraninda metinlerin cok DAR bir seride tek harf tek harf alt alta
+    # sikisip "bozuk" gorundugu bulgu): RecycleBoxLayout'un
+    # default_size_hint'i acikca (1, None) verilmezse Kivy'nin VARSAYILANI
+    # (None, None) kullanilir ve satirlar genel widget varsayilanina
+    # (100px) DUSER - metinler de o dar genislige sigdirilmaya calisilirken
+    # harf harf sarar. Burada gercekten kurulan satir widget'inin
+    # genisliginin RecycleView'in (dolayisiyla ekranin) genisligine yakin
+    # oldugunu, 100px gibi sabit bir varsayilanda TAKILI KALMADIGINI
+    # dogrudan dogruluyoruz.
+    first_row = rv_layout.children[0]
+    assert first_row.width > dp(200), (
+        f"Gecmis satiri cok dar ({first_row.width}px) - RecycleBoxLayout'un "
+        f"default_size_hint'i muhtemelen (1, None) degil, bu da metinlerin "
+        f"harf harf sarmasina/'bozuk' gorunmesine yol acar (bkz. bu testin "
+        f"ustundeki KOK NEDEN notu, screens/history.py)")
 
     # Silme akisi: "on_delete" geri cagirimini dogrudan cagiriyoruz - bu,
     # gercek bir Button.dispatch('on_release') ile AYNI kod yolu

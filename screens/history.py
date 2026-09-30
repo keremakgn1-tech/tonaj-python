@@ -60,9 +60,31 @@ class HistoryScreen(Screen):
         # viewclass, sonra add_widget) kullandigi icin ayni sekilde
         # etkileniyordu (kullanici henuz bildirmemis olsa da). Viewclass
         # atamasi artik add_widget(rv_layout)'tan SONRA yapiliyor.
+        # KOK NEDEN (kullanicidan gelen ekran goruntusu - Gecmis ekraninda
+        # yazilarin cok DAR bir seride tek harf tek harf alt alta sikisip
+        # "bozuk"/okunmaz gorundugu bulgu): RecycleBoxLayout'un
+        # default_size_hint'i Kivy'de VARSAYILAN olarak (None, None) -
+        # yani rv.data icindeki her satir sozlugunde "size_hint_x" (ya da
+        # "width") ACIKCA verilmedigi surece (burada hicbir zaman
+        # verilmiyordu, sadece "height"/"size_hint_y" veriliyordu) satir
+        # genisligi Kivy'nin genel varsayilan widget boyutuna (100px)
+        # DUSUYORDU. 100px'lik bir genislige sigdirilmaya calisilan
+        # (tarih, tonaj, hareket adi, hedef karsilastirmasi gibi) metinler
+        # de kelime/harf harf alt alta sarmak zorunda kaliyor, bu da tam
+        # olarak "bozuk gorunum" seklinde bildirilen sikayeti aciklıyor.
+        # Hareket secici popup'indaki AYNI RecycleBoxLayout deseni
+        # (bkz. screens/program.py _build_exercise_picker) bunu zaten
+        # default_size_hint=(1, None) ile dogru yapiyordu - bu ekran o
+        # satiri atlamisti. DUZELTME: default_size_hint'in x kismi 1
+        # yapildi, boylece "size_hint_x" rv.data'da hic verilmese bile
+        # satir RecycleView'in TAM genisligini kaplar (yukseklik zaten
+        # her satir icin history_card_height() ile ACIKCA veriliyor,
+        # dolayisiyla default_size'in yukseklik kismi pratikte hemen hic
+        # kullanilmiyor ama yine de makul bir baslangic degeri verildi).
         rv = RecycleView(size_hint=(1, 1))
         rv_layout = RecycleBoxLayout(
             orientation="vertical", size_hint_y=None, spacing=dp(10), padding=dp(12),
+            default_size=(None, dp(80)), default_size_hint=(1, None),
         )
         rv_layout.bind(minimum_height=rv_layout.setter("height"))
         rv.add_widget(rv_layout)
