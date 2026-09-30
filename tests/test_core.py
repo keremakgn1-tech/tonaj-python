@@ -430,6 +430,73 @@ def test_set_day_exercise_target_updates_active_session_live():
     assert state["activeSession"]["exercises"][0]["targetSets"] == 5
 
 
+def test_move_day_exercise():
+    # UX (kullanicidan gelen istek - "eklediğim hareketlerin yerlerini
+    # nasıl değiştirebilirim") - move_program_day ile AYNI desen, tek bir
+    # gunun KENDI hareket listesi icinde.
+    state = core.default_state()
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3)
+    core.set_day_exercise_target(state, day["id"], "Bench Press", target_sets=3)
+    core.move_day_exercise(state, day["id"], 1, -1)
+    assert [e["name"] for e in day["exercises"]] == ["Bench Press", "Squat"]
+
+
+def test_move_day_exercise_out_of_bounds_is_noop():
+    state = core.default_state()
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3)
+    core.move_day_exercise(state, day["id"], 0, -1)  # zaten en basta
+    assert [e["name"] for e in day["exercises"]] == ["Squat"]
+    core.move_day_exercise(state, day["id"], 0, 1)  # zaten TEK eleman, disariya cikamaz
+    assert [e["name"] for e in day["exercises"]] == ["Squat"]
+
+
+def test_move_day_exercise_unknown_day_is_noop():
+    state = core.default_state()
+    core.move_day_exercise(state, "olmayan-id", 0, 1)  # hata firlatmamali
+
+
+def test_set_day_exercise_target_note_saved_and_updated():
+    # UX (kullanicidan gelen istek - "bazı hareketlere not eklemek
+    # istiyorum").
+    state = core.default_state()
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3,
+                                  note="dizleri dışarı doğru it")
+    assert day["exercises"][0]["note"] == "dizleri dışarı doğru it"
+
+    # not GONDERILMEZSE (None) - obj yine SIFIRDAN kuruldugu icin eski not
+    # KORUNMAZ, None olur. Bu, targetRepsMin gibi diger tum alanlarla AYNI
+    # ("yeni cagri eski degeri tasimaz") davranis - UI (open_target_editor)
+    # notu HER ZAMAN (degismemis olsa bile) geri gonderdigi icin gercek
+    # kullanimda bu bir sorun yaratmaz.
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=5)
+    assert day["exercises"][0]["note"] is None
+
+
+def test_set_day_exercise_target_empty_note_stored_as_none():
+    # UI, bos bir not kutusunu note="" olarak gonderir (strip() sonrasi) -
+    # bunun disariya "" olarak degil None olarak sizmasi, "not var mi"
+    # kontrollerini (ex.get("note")) sadece bos-string kontrolu YAPMADAN
+    # dogru calistirir.
+    state = core.default_state()
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3, note="")
+    assert day["exercises"][0]["note"] is None
+
+
+def test_start_session_carries_exercise_note():
+    # UX (kullanicidan gelen istek): not, antrenman SIRASINDA da
+    # gorunebilsin diye aktif seansa da tasinmali.
+    state = core.default_state()
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3,
+                                  note="dizleri dışarı doğru it")
+    core.start_session(state, day_id=day["id"])
+    assert state["activeSession"]["exercises"][0]["note"] == "dizleri dışarı doğru it"
+
+
 def test_remove_exercise_from_day():
     state = core.default_state()
     day = core.add_program_day(state)

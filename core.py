@@ -754,6 +754,11 @@ def start_session(state, day_id=None, is_deload=False):
                     "restSeconds": item.get("restSeconds"),
                     "suggestedWeight": suggestion["weight"] if suggestion else None,
                     "suggestReason": suggestion["reason"] if suggestion else None,
+                    # Antrenman SIRASINDA da hareket notunu gorebilsin diye
+                    # (kullanicidan gelen istek) - programdaki notu aktif
+                    # seansa da tasiyoruz, bkz. screens/program.py
+                    # exercise_card()'daki "NOT" satiri.
+                    "note": item.get("note"),
                 })
             day_name = day["name"]
     state["activeSession"] = {
@@ -845,12 +850,21 @@ def duplicate_program_day(state, day_id):
 
 def set_day_exercise_target(state, day_id, name, target_sets=None, target_reps_min=None,
                              target_reps_max=None, target_weight=None, target_rir=None,
-                             rest_seconds=None, muscle_groups=None):
+                             rest_seconds=None, muscle_groups=None, note=None):
+    # KOK NEDEN (kullanicidan gelen istek - "bazı hareketlere not eklemek
+    # istiyorum"): bu fonksiyon HER cagrildiginda "obj" dict'ini SIFIRDAN
+    # kuruyor (var olan alanlari KORUMUYOR) - yani "note" parametresi
+    # eklenmeseydi, sadece hedef degerlerini (set/tekrar/agirlik) guncellemek
+    # icin bu fonksiyon cagrildiginda mevcut not SESSIZCE silinirdi. Tek
+    # cagiran yer (screens/program.py open_target_editor -> do_save) ayni
+    # popup'ta hem hedefleri HEM notu duzenledigi icin note'u da HER ZAMAN
+    # (degismemis olsa bile) buraya geciyor - obj yine tam olarak
+    # yeniden kuruluyor ama artik notu da icine alarak.
     day = next(d for d in state["program"]["days"] if d["id"] == day_id)
     idx = next((i for i, e in enumerate(day["exercises"]) if e["name"] == name), -1)
     obj = {"name": name, "targetSets": target_sets, "targetRepsMin": target_reps_min,
            "targetRepsMax": target_reps_max, "targetWeight": target_weight,
-           "targetRIR": target_rir, "restSeconds": rest_seconds}
+           "targetRIR": target_rir, "restSeconds": rest_seconds, "note": note or None}
     if idx >= 0:
         day["exercises"][idx] = obj
     else:
@@ -868,6 +882,26 @@ def set_day_exercise_target(state, day_id, name, target_sets=None, target_reps_m
 def remove_exercise_from_day(state, day_id, idx):
     day = next(d for d in state["program"]["days"] if d["id"] == day_id)
     day["exercises"].pop(idx)
+
+
+def move_day_exercise(state, day_id, idx, direction):
+    """Bir gunun icindeki hareketlerin SIRASINI degistirir (kullanicidan
+    gelen istek - "eklediğim hareketlerin yerlerini nasıl değiştirebilirim").
+
+    move_program_day() ile AYNI desen (bkz. yukarida) - sadece gunler
+    arasinda degil, TEK bir gunun kendi hareket listesi icinde calisiyor.
+    idx/direction sinirlarin disina cikarsa (ör. ilk hareketi yukari,
+    son hareketi asagi tasimaya calismak) SESSIZCE hicbir sey yapmaz -
+    move_program_day de ayni sekilde davraniyor, UI tarafinda ayrica bir
+    "devre disi" gorunumu yok (butonlar her zaman gorunur, sinirda no-op)."""
+    day = next((d for d in state["program"]["days"] if d["id"] == day_id), None)
+    if not day:
+        return
+    exercises = day["exercises"]
+    target = idx + direction
+    if idx < 0 or idx >= len(exercises) or target < 0 or target >= len(exercises):
+        return
+    exercises[idx], exercises[target] = exercises[target], exercises[idx]
 
 
 def next_suggested_day_id(state):

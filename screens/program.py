@@ -29,7 +29,7 @@ from shared import (
     weight_unit, to_display_weight, to_storage_kg, fmt_weight,
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
-    toast, target_label, _find_scrollview, exercise_search_input,
+    toast, target_label, _find_scrollview, exercise_search_input, note_input,
 )
 
 
@@ -171,13 +171,24 @@ class ProgramScreen(Screen):
         if meta:
             card.add_widget(label(meta + f" · {len(day['exercises'])} hareket", size=14, color=MUTED, height=dp(20)))
 
+        # KOK NEDEN (kullanicidan gelen istek - "eklediğim hareketlerin
+        # yerlerini nasıl değiştirebilirim"): gunler arasinda sira degistirme
+        # (yukaridaki eyebrow'daki ↑/↓) zaten vardi, ama bir GUNUN KENDI
+        # hareket listesi icin YOKTU - hareketler SADECE eklendikleri sirada
+        # duruyordu, degistirmenin tek yolu hareketi silip yeniden (dogru
+        # sirada) eklemekti. Gun-seviyesindeki move_program_day() ile AYNI
+        # deseni (core.move_day_exercise) tek bir hareket satirina da
+        # uyguluyoruz - SADECE Düzenle modunda gorunur, tipki "×" gibi.
         for i, ex in enumerate(day["exercises"]):
-            row = ClickableRow(size_hint_y=None, height=dp(40), spacing=dp(6), padding=(0, dp(2)))
-            with row.canvas.before:
+            ex_wrap = BoxLayout(orientation="vertical", size_hint_y=None, padding=(0, dp(2)))
+            ex_wrap.bind(minimum_height=ex_wrap.setter("height"))
+            with ex_wrap.canvas.before:
                 Color(*DIVIDER)
-                rline = Line(points=[0, row.top, row.width, row.top], width=dp(1))
-            row.bind(pos=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]),
-                     size=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]))
+                rline = Line(points=[0, ex_wrap.top, ex_wrap.width, ex_wrap.top], width=dp(1))
+            ex_wrap.bind(pos=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]),
+                         size=lambda w, *_: setattr(rline, 'points', [w.x, w.top, w.right, w.top]))
+
+            row = ClickableRow(size_hint_y=None, height=dp(40), spacing=dp(4))
             row.add_widget(label(ex["name"], size=14.5, bold=True, color=TEXT))
             tgt = target_label(ex) or "hedef yok"
             tgt_lbl = mono_label(tgt, size=13.5, color=MUTED, halign="right",
@@ -187,10 +198,28 @@ class ProgramScreen(Screen):
             # YAPISINI degistiren islemler - sadece Düzenle modunda aktif.
             if editable:
                 row.bind(on_release=lambda *_, d=day, e=ex: self.open_target_editor(d, e["name"]))
+                up = Button(text="↑", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=FAINT, font_size=sp_(15))
+                down = Button(text="↓", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=FAINT, font_size=sp_(15))
+                up.bind(on_release=lambda *_, d=day, idx=i: (core.move_day_exercise(state, d["id"], idx, -1), app.save(), self.render(keep_scroll=True)))
+                down.bind(on_release=lambda *_, d=day, idx=i: (core.move_day_exercise(state, d["id"], idx, 1), app.save(), self.render(keep_scroll=True)))
                 rm = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(17))
                 rm.bind(on_release=lambda *_, d=day, idx=i: (core.remove_exercise_from_day(state, d["id"], idx), app.save(), self.render(keep_scroll=True)))
-                row.add_widget(rm)
-            card.add_widget(row)
+                for w in (up, down, rm):
+                    row.add_widget(w)
+            ex_wrap.add_widget(row)
+
+            # UX (kullanicidan gelen istek - "hareket notu eklemek
+            # istiyorum"): notu olan hareketlerde, satirin altinda kisa bir
+            # onizleme satiri gosteriyoruz - notun TAMAMINI gormek/duzenlemek
+            # icin satira dokunup Hedef popup'ini acmak yeterli (asagida
+            # open_target_editor icindeki not alani).
+            if ex.get("note"):
+                note_lbl = label(ex["note"], size=12.5, color=FAINT, height=dp(18))
+                note_lbl.shorten = True
+                note_lbl.shorten_from = "right"
+                ex_wrap.add_widget(note_lbl)
+
+            card.add_widget(ex_wrap)
 
         actions = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(16), padding=(0, dp(10), 0, 0))
         if editable:
@@ -501,6 +530,12 @@ class ProgramScreen(Screen):
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
             content.add_widget(w)
 
+        # UX (kullanicidan gelen istek - "bazı hareketlere not eklemek
+        # istiyorum") - bkz. shared.note_input()'taki KOK NEDEN notu.
+        content.add_widget(label("Not", size=12, color=MUTED, height=dp(16)))
+        note_i = note_input(text=existing.get("note") or "")
+        content.add_widget(note_i)
+
         # KOK NEDEN (kullanicinin gonderdigi ekran goruntusunde "‹ Geri"
         # kutusu duzgun ama hemen yanindaki hareket adi ve altindaki alanlar
         # arka plansiz gorunup arkadaki gun kartinin satiri sizmasi): Popup
@@ -528,6 +563,7 @@ class ProgramScreen(Screen):
                 # UNUTMUSTUK - burada da dismiss() hemen ardindan (ayni Python
                 # cagrisinda) on_back() -> open_exercise_picker() -> yeni bir
                 # Popup aciliyordu. Ayni sekilde bir kare araya koyuyoruz.
+                note_i.focus = False
                 popup.dismiss(animation=False)
                 Clock.schedule_once(lambda *_b: on_back(), 0)
             back_btn = styled_button("‹ Geri", color=RAISED, text_color=TEXT,
@@ -550,8 +586,14 @@ class ProgramScreen(Screen):
                 target_reps_max=to_num(rmax_i.value),
                 target_weight=to_storage_kg(to_num(w_i.value, float)),
                 target_rir=to_num(rir_i.value), rest_seconds=to_num(rest_i.value),
+                note=note_i.text.strip(),
             )
             app.save()
+            # search.focus = False (bkz. _build_exercise_picker'daki pick()
+            # icindeki AYNI desen) - not alaninda hala odak/klavye acikken
+            # dismiss edersek, klavye kapanma animasyonu popup kapandiktan
+            # SONRA da bir sure devam edebilir; once odaktan cikariyoruz.
+            note_i.focus = False
             # animation=False: diger tum popup gecislerinde oldugu gibi (bkz.
             # _build_exercise_picker'daki notlar) - kullanici hemen ardindan
             # baska bir hareketin hedefini acarsa, eski (hala solmakta olan)
@@ -725,6 +767,22 @@ class ProgramScreen(Screen):
                 sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
                 sug_row.add_widget(label(txt, size=14, color=STEEL))
                 card.add_widget(sug_row)
+            if ex.get("note"):
+                # UX (kullanicidan gelen istek - "bazı hareketlere not
+                # eklemek istiyorum"): notun asil faydasi TAM DA antrenman
+                # SIRASINDA gorunmesi (ör. "dirsekleri içeride tut") - bu
+                # yuzden HEDEF/ONERI ile AYNI "etiket + metin" satir desenini
+                # kullaniyoruz, ama notlar (steppers'in aksine) uzun/coklu
+                # satir olabilecegi icin, sabit dp(30) yerine label()'in
+                # kendi (texture_size'a gore otomatik buyuyen, bkz. label()
+                # tanimindaki KOK NEDEN notu) yuksekligini satira da
+                # yansitiyoruz - not KIRPILMADAN tam okunabilsin.
+                note_lbl = label(ex["note"], size=14, color=MUTED)
+                note_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
+                note_row.add_widget(label("NOT", size=14, bold=True, color=MUTED, size_hint_x=None, width=dp(56)))
+                note_row.add_widget(note_lbl)
+                note_lbl.bind(height=lambda _w, h: setattr(note_row, "height", max(dp(30), h)))
+                card.add_widget(note_row)
 
             for si, s in enumerate(ex["sets"]):
                 row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))

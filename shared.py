@@ -524,6 +524,38 @@ def exercise_search_input(hint="Hareket ara…"):
     )
 
 
+def note_input(text=""):
+    """Bir hareket icin serbest metin NOT alani (kullanicidan gelen istek -
+    "bazı hareketlere not eklemek istiyorum").
+
+    KOK NEDEN (neden yine bir TextInput - "sifir klavye" kuralina istisna):
+    make_stepper()'daki "sifir klavye" kurali, SAYISAL degerler (set/tekrar/
+    agirlik/RIR/dinlenme) icindi - bunlarin hepsi +/- ile ifade edilebilir.
+    Bir NOT ("dirsekleri içeride tut", "sağ omuz dikkat" gibi) dogasi geregi
+    serbest metin - bir sayaçla girilemez. exercise_search_input() (hareket
+    ARAMA kutusu) uygulamadaki BILINCLI TEK klavye istisnasiydi; bu, aynı
+    gerekcelerle (kullanicidan gelen acik istek, sayisal bir alternatifi
+    olmayan bir ihtiyac) eklenen IKINCI ve YINE BILINCLI istisna - "sifir
+    klavye" kurali "gereksiz yere klavye acma" anlamina geliyor, "hicbir
+    zaman serbest metin gerektirmeyen bir ozellik eklenmez" anlamina
+    gelmiyor.
+
+    multiline=True: notlar birden fazla satira sigacak kadar uzun olabilir
+    (ör. "1. ısınma setinde hafif başla, 2. sette tam ağırlık"). Yukseklik
+    sabit degil - Hedef popup'inin geri kalani gibi (bkz. fit_popup_to_content)
+    icerige gore genisleyebilsin diye size_hint_y=None + minimum_height
+    disaridan (open_target_editor icinde) baglaniyor.
+    """
+    ti = TextInput(
+        text=text, hint_text="Not (opsiyonel) — ör. \"dirsekleri içeride tut\"",
+        multiline=True, size_hint_y=None, height=dp(72),
+        background_color=RAISED, foreground_color=TEXT, hint_text_color=MUTED,
+        cursor_color=ACCENT, padding=[dp(10), dp(10), dp(10), dp(10)],
+        font_name="Oswald", font_size=sp_(13),
+    )
+    return ti
+
+
 class _PickerRow(RecycleDataViewBehavior, Button):
     """Hareket secici (screens/program.py: _build_exercise_picker, Task 17)
     icin RecycleView satir gorunumu.

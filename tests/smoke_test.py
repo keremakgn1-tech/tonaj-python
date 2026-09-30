@@ -998,6 +998,130 @@ def step_delete_day():
 safe("delete day flow", step_delete_day)
 
 
+def step_reorder_day_exercises_via_up_down():
+    # UX (kullanicidan gelen istek - "eklediğim hareketlerin yerlerini
+    # nasıl değiştirebilirim"): gun-seviyesindeki ↑/↓ ile AYNI ekranda,
+    # AYNI metinli ("↑"/"↓") butonlar bulundugu icin find_text() TUM
+    # ekranda ilk esleseni (gun basligindaki oku) bulurdu - bu yuzden
+    # aramayi SADECE ilgili hareketin kendi satirina (label'in .parent'i)
+    # DARALTIYORUZ, boylece hangi hareketin oku tiklandigi belirsiz olmuyor.
+    go("program")
+    state = app.state
+    state["program"]["days"] = []
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3)
+    core.set_day_exercise_target(state, day["id"], "Bench Press", target_sets=3)
+    program_screen.edit_mode = True
+    program_screen.render()
+
+    assert [e["name"] for e in day["exercises"]] == ["Squat", "Bench Press"]
+
+    squat_lbl = find_text(program_screen, "Squat")
+    assert squat_lbl is not None, "Squat satiri bulunamadi"
+    squat_row = squat_lbl.parent
+    down_btn = find_text(squat_row, "↓")
+    assert down_btn is not None, "Squat satirinda asagi ok bulunamadi"
+    click(down_btn)
+
+    assert [e["name"] for e in day["exercises"]] == ["Bench Press", "Squat"], \
+        "asagi ok Squat'i Bench Press'in ALTINA tasimali"
+
+    program_screen.render()
+    # Squat artik 2. sirada (index 1) - kendi satirindaki YUKARI oku
+    # tiklayinca tekrar 1. siraya (Bench Press'in USTUNE) donmeli.
+    squat_lbl2 = find_text(program_screen, "Squat")
+    up_btn = find_text(squat_lbl2.parent, "↑")
+    assert up_btn is not None
+    click(up_btn)
+    assert [e["name"] for e in day["exercises"]] == ["Squat", "Bench Press"], \
+        "yukari ok Squat'i tekrar Bench Press'in USTUNE tasimali"
+
+    # Gorunum modunda (Duzenle kapali) hareket satirlarinda ↑/↓/× hic
+    # gorunmemeli - program YAPISINI degistiren butun butonlar gibi.
+    program_screen.edit_mode = False
+    program_screen.render()
+    squat_lbl2 = find_text(program_screen, "Squat")
+    assert find_text(squat_lbl2.parent, "↓") is None, \
+        "gorunum modunda hareket satirinda asagi ok gorunmemeli"
+
+safe("reorder exercises within a day via ↑/↓ (edit mode only)",
+     step_reorder_day_exercises_via_up_down)
+
+
+def step_exercise_note_save_and_display():
+    # UX (kullanicidan gelen istek - "bazı hareketlere not eklemek
+    # istiyorum"): Hedef popup'indaki not kutusuna yazip Kaydet'e basinca
+    # state'e islenmeli, gun kartinda kisa bir onizleme olarak gorunmeli.
+    go("program")
+    state = app.state
+    state["program"]["days"] = []
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3)
+    program_screen.edit_mode = True
+    program_screen.render()
+
+    squat_lbl = find_text(program_screen, "Squat")
+    assert squat_lbl is not None
+    click(squat_lbl.parent)  # ClickableRow -> Hedef popup'ini acar
+    Clock.tick()
+    popup = top_popup("Hedef")
+    assert popup is not None, "Hedef popup'i acilmadi"
+
+    note_boxes = [w for w in popup.walk() if isinstance(w, TextInput)]
+    assert len(note_boxes) == 1, "Hedef popup'inda tam olarak bir not kutusu olmali"
+    note_box = note_boxes[0]
+    assert note_box.text == "", "yeni hareketin notu bos baslamali"
+    note_box.text = "dizleri dışarı doğru it"
+
+    save_btn = find_text(popup, "KAYDET")
+    assert save_btn is not None, "Kaydet butonu bulunamadi"
+    click(save_btn)
+
+    assert day["exercises"][0]["note"] == "dizleri dışarı doğru it", \
+        "not state'e kaydedilmedi"
+
+    program_screen.render()
+    assert find_text(program_screen, "dizleri dışarı doğru it", exact=False) is not None, \
+        "kaydedilen not gun kartinda onizleme olarak gorunmuyor"
+
+    # Hedef popup'ini tekrar acinca ONCEDEN girilen not GERI YUKLENMELI
+    # (targetSets/targetRepsMin gibi diger tum alanlarla AYNI davranis).
+    squat_lbl2 = find_text(program_screen, "Squat")
+    click(squat_lbl2.parent)
+    Clock.tick()
+    popup2 = top_popup("Hedef")
+    note_box2 = [w for w in popup2.walk() if isinstance(w, TextInput)][0]
+    assert note_box2.text == "dizleri dışarı doğru it", \
+        "Hedef popup'i tekrar acilinca onceki not geri yuklenmedi"
+    popup2.dismiss(animation=False)
+
+safe("exercise note: save in Hedef popup, persists, and previews in day card",
+     step_exercise_note_save_and_display)
+
+
+def step_exercise_note_shows_during_active_session():
+    # UX: notun asil faydasi TAM DA antrenman SIRASINDA gorunmesi (ör.
+    # "dirsekleri içeride tut") - bkz. exercise_card()'daki "NOT" satiri.
+    go("program")
+    state = app.state
+    state["program"]["days"] = []
+    day = core.add_program_day(state)
+    core.set_day_exercise_target(state, day["id"], "Squat", target_sets=3,
+                                  note="dizleri dışarı doğru it")
+    core.start_session(state, day_id=day["id"])
+    program_screen.render()
+    try:
+        assert find_text(program_screen, "dizleri dışarı doğru it", exact=False) is not None, \
+            "not, aktif antrenman ekraninda gorunmuyor"
+    finally:
+        # Sonraki testleri etkilememesi icin aktif seansi temizle.
+        core.discard_session(state)
+        program_screen.render()
+
+safe("exercise note: shows on the exercise card during an active session",
+     step_exercise_note_shows_during_active_session)
+
+
 def step_settings_export_import_desktop():
     go("settings")
     settings_screen.on_pre_enter()
