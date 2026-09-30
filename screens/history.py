@@ -76,7 +76,7 @@ class HistoryScreen(Screen):
             {
                 "session": s,
                 "on_delete": (lambda sid=s["id"]: self.confirm_delete_session(sid)),
-                "height": history_card_height(len(s["exercises"])),
+                "height": history_card_height(s["exercises"]),
                 "size_hint_y": None,
             }
             for s in state["history"]

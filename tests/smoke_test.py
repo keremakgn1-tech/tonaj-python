@@ -703,7 +703,8 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
     app.state["history"] = [
         {"id": "h1", "startedAt": 1000, "dayId": None, "dayName": "Test Günü A",
          "isDeload": False, "note": "",
-         "exercises": [{"name": "Squat", "sets": [{"weight": 100, "reps": 5, "isWarmup": False}]}]},
+         "exercises": [{"name": "Squat", "targetWeight": 90,
+                         "sets": [{"weight": 100, "reps": 5, "isWarmup": False}]}]},
         {"id": "h2", "startedAt": 2000, "dayId": None, "dayName": "Test Günü B",
          "isDeload": False, "note": "",
          "exercises": [
@@ -723,8 +724,24 @@ def step_history_screen_uses_recycleview_and_shows_all_sessions():
     assert len(rvs) == 1, "Gecmis ekraninda tam olarak bir RecycleView olmali"
     rv = rvs[0]
     assert len(rv.data) == 2, "rv.data iki oturumu da icermeli"
-    assert rv.data[0]["height"] == history_card_height(1), "1 hareketli oturumun yuksekligi yanlis hesaplandi"
-    assert rv.data[1]["height"] == history_card_height(2), "2 hareketli oturumun yuksekligi yanlis hesaplandi"
+    h1_exercises = app.state["history"][0]["exercises"]
+    h2_exercises = app.state["history"][1]["exercises"]
+    assert rv.data[0]["height"] == history_card_height(h1_exercises), (
+        "1 hareketli (hedefli) oturumun yuksekligi yanlis hesaplandi")
+    assert rv.data[1]["height"] == history_card_height(h2_exercises), (
+        "2 hareketli (hedefsiz) oturumun yuksekligi yanlis hesaplandi")
+    # KOK NEDEN DUZELTMESI (kullanicidan gelen ekran goruntusu - Gecmis
+    # ekraninda yazilarin ust uste bindigi/"bozuk" gorundugu bulgu):
+    # hedefli bir hareket, hedefsiz olandan dp(21) daha fazla yer kaplar
+    # (ekstra karsilastirma alt satiri yuzunden) - eskiden bu fark
+    # history_card_height()'te HESABA KATILMIYORDU, yani hedefli
+    # oturumlarin GERCEK yuksekligi RecycleView'e SOYLENENDEN fazlaydi ve
+    # icerik bir SONRAKI satirin uzerine tasiyordu. Burada bu farki
+    # dogrudan dogruluyoruz.
+    assert history_card_height(h1_exercises) > history_card_height([{"name": "Squat", "sets": []}]), (
+        "hedefli bir hareketin yuksekligi, hedefsiz olandan BUYUK olmali "
+        "(ekstra karsilastirma satiri icin) - aksi halde Gecmis "
+        "ekraninda icerik bir sonraki satirin uzerine tasar")
     assert rv.data[0]["session"]["exercises"][0]["name"] == "Squat"
     assert rv.data[1]["session"]["exercises"][0]["name"] == "Bench Press"
 

@@ -57,7 +57,24 @@ class ReportScreen(Screen):
         from datetime import datetime as _dt
         trend = core.weekly_tonnage_trend(state, weeks=8)
         col.add_widget(label("SON 8 HAFTA - TONAJ TRENDİ", size=14, color=MUTED, bold=True, height=dp(26)))
-        chart_card = Card()
+        # KOK NEDEN (kullanicidan gelen ekran goruntusu - Rapor ekraninda
+        # ustteki ozet karti ile "SON 8 HAFTA" basligi/grafiginin ust uste
+        # bindigi bulgu): Card() (BoxLayout alt sinifi) varsayilan olarak
+        # size_hint_y=1 ile kurulur - bu dosyadaki DIGER butun Card()
+        # cagrilari (stats, bar) bunu ACIKCA size_hint_y=None + sabit
+        # height ile eziyor, ama burasi UNUTULMUSTU. col, size_hint_y=None
+        # olup yuksekligini cocuklarinin minimum_height toplamindan alan
+        # bir BoxLayout - boyle bir BoxLayout icinde size_hint_y=1 olan bir
+        # cocuk, minimum_height hesabina kendi GERCEK icerik yuksekligiyle
+        # degil, Kivy'nin varsayilan Widget.height'i (100dp) ile katkida
+        # bulunuyordu. Ama WeeklyBarChart(icerik) dp(130) + Card paddingi
+        # dp(24) = dp(154) yer kapliyordu - yani chart_card'a ayrilan alan
+        # (100dp) gercek icerikten (154dp) DAHA KUCUKTU, grafik bir
+        # SONRAKI/ONCEKI widget'in uzerine tasiyordu.
+        # DUZELTME: diger Card() cagrilariyla AYNI desen - acikca
+        # size_hint_y=None + WeeklyBarChart'in gercek yuksekligini (dp(130))
+        # kapsayan bir height veriliyor.
+        chart_card = Card(size_hint_y=None, height=dp(130) + dp(24))
         points = []
         for i, p in enumerate(trend):
             wk_dt = _dt.fromtimestamp(p["weekStart"] / 1000)

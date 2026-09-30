@@ -611,7 +611,7 @@ class _PickerRow(RecycleDataViewBehavior, Button):
             self._pick_cb()
 
 
-def history_card_height(n_exercises):
+def history_card_height(exercises):
     """_HistorySessionRow'un yuksekligini, RecycleView satiri GERCEKTEN
     kurulmadan ONCE hesaplar - RecycleView, kaydirma sinirlarini dogru
     belirleyebilmek icin her satirin yuksekligini widget'lar kurulmadan
@@ -619,12 +619,40 @@ def history_card_height(n_exercises):
     _HistorySessionRow'daki KOK NEDEN notu). Bu ARITMETIK hesap guvenilir,
     cunku asagidaki sabitler _HistorySessionRow'un GERCEKTEN kurdugu
     padding/spacing/satir-yuksekligi degerleriyle BIREBIR AYNI (ikisi
-    birbirine kenetli - biri degisirse digeri de guncellenmeli)."""
+    birbirine kenetli - biri degisirse digeri de guncellenmeli).
+
+    KOK NEDEN (kullanicidan gelen ekran goruntusu - Gecmis ekraninda
+    yazilarin ust uste bindigi/"bozuk" gorundugu bulgu): bu fonksiyon
+    ESKIDEN her hareket icin SABIT bir row_h=dp(48) kullaniyordu - ama
+    _HistorySessionRow._build_content() bir hareketin "hedef" bilgisi
+    varsa (targetSets/targetRepsMin/targetRepsMax/targetWeight) o satira
+    EK bir alt satir (sub_row, dp(18) + dp(3) spacing) ekliyordu. Sabit
+    dp(48) bu ekstra alt satiri HESABA KATMIYORDU, yani hedefi olan HER
+    hareket icin gercek icerik, RecycleView'in ona ayirdigi yukseklikten
+    ~dp(21) daha uzun oluyordu. RecycleView her satiri, kendisine
+    SOYLENEN (ve gercekte kucuk kalan) yukseklikte konumlandirdigi icin
+    icerik bir SONRAKI satirin uzerine tasiyor, bu da coklu hareketli
+    (ozellikle hedefli) oturumlarda ust uste binen/karisik metin olarak
+    gorunuyordu.
+
+    DUZELTME: artik hareket SAYISI degil, hareketlerin KENDISI aliniyor -
+    her biri icin gercekte hedefi olup olmadigina bakilip yuksekligi ona
+    gore (hedefliyse ekstra sub_row payiyla) hesaplaniyor."""
     pad = dp(12) * 2   # Card-benzeri dikey padding (ust + alt)
     head_h = dp(34)    # tarih/tonaj baslik satiri
-    row_h = dp(48)     # her hareket satiri (sabit yukseklik, metne gore BUYUMEZ)
+    row_pad = dp(12)   # her hareket satirinin kendi ust+alt paddingi (0, dp(6), 0, dp(6))
+    top_h = dp(20)     # her hareket satirinin ilk (isim/agirlik) satiri
+    sub_h = dp(18)     # hedefi olan hareketlerde eklenen ikinci (karsilastirma) satiri
+    sub_spacing = dp(3)  # top_h ile sub_h arasindaki bosluk (sadece hedefliyse)
     spacing = dp(6)    # Card-benzeri cocuklar-arasi bosluk
-    return pad + head_h + n_exercises * (row_h + spacing)
+
+    total = pad + head_h
+    for ex in exercises:
+        has_target = bool(ex.get("targetSets") or ex.get("targetRepsMin")
+                           or ex.get("targetRepsMax") or ex.get("targetWeight"))
+        row_h = row_pad + top_h + ((sub_spacing + sub_h) if has_target else 0)
+        total += row_h + spacing
+    return total
 
 
 class _HistorySessionRow(RecycleDataViewBehavior, BoxLayout):
@@ -695,7 +723,17 @@ class _HistorySessionRow(RecycleDataViewBehavior, BoxLayout):
         for i, ex in enumerate(sorted_exercises):
             cmp = core.history_exercise_compare(ex)
             is_empty = cmp["delta"][0] == "none"
-            row = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(48), spacing=dp(3),
+            # KOK NEDEN (kullanicidan gelen ekran goruntusu - Gecmis
+            # ekraninda yazilarin ust uste bindigi bulgu): bu satir eskiden
+            # her zaman SABIT dp(48) yukseklikteydi, ama hedefi olan bir
+            # hareket icin asagida BIR satir daha (sub_row, dp(18)+dp(3)
+            # spacing) ekleniyordu - sabit dp(48) bunu HESABA KATMIYORDU,
+            # yani hedefli hareketlerde icerik kendi satirinin sinirlarini
+            # tasiyordu. DUZELTME: yukseklik artik hedefi olup olmamasina
+            # gore hesaplaniyor (bkz. history_card_height() - AYNI formul,
+            # ikisi kenetli: biri degisirse digeri de guncellenmeli).
+            row_h = dp(12) + dp(20) + ((dp(3) + dp(18)) if cmp["hasTarget"] else 0)
+            row = BoxLayout(orientation="vertical", size_hint_y=None, height=row_h, spacing=dp(3),
                              padding=(0, dp(6), 0, dp(6)))
             if i > 0:
                 with row.canvas.before:
