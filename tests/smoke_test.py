@@ -1307,6 +1307,35 @@ safe("stepper: art arda gelen on_press (on_release'siz) tekrar zamanlayicisini s
      step_stepper_double_press_does_not_leak_repeat_timer)
 
 
+def step_library_rename_exercise_keeps_history():
+    from kivy.uix.textinput import TextInput as _TI
+    app.state["history"] = [
+        {"id": "r1", "startedAt": 1000, "dayId": None, "dayName": "X", "isDeload": False, "note": "",
+         "exercises": [{"name": "Yanlis Isim", "sets": [{"weight": 40, "reps": 10, "isWarmup": False}]}]},
+    ]
+    go("library")
+    library_screen = sm.get_screen("library")
+    library_screen.on_pre_enter()
+    lbl = find_text(library_screen, "Yanlis Isim")
+    assert lbl is not None, "Hareketler ekraninda hareket satiri yok"
+    row = lbl
+    while row is not None and type(row).__name__ != "_TapCard":
+        row = row.parent
+    assert row is not None, "satir dokunulabilir (_TapCard) degil"
+    row.dispatch("on_release")
+    popup = top_popup("Hareketi Yeniden Adlandır")
+    assert popup is not None, "yeniden adlandirma popup'i acilmadi"
+    ti = [w for w in popup.walk() if isinstance(w, _TI)][0]
+    assert ti.text == "Yanlis Isim"
+    ti.text = "Dogru Isim"
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    assert app.state["history"][0]["exercises"][0]["name"] == "Dogru Isim"
+    assert app.state["history"][0]["exercises"][0]["sets"][0]["weight"] == 40
+    assert find_text(library_screen, "Dogru Isim") is not None, "liste yenilenmedi"
+
+safe("library: rename exercise keeps history", step_library_rename_exercise_keeps_history)
+
+
 print()
 print("=" * 60)
 if errors:

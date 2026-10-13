@@ -664,3 +664,44 @@ def test_increment_for_known_categories():
 
 def test_increment_for_unknown_exercise_defaults_to_compound():
     assert core.increment_for("Hic Tanimli Olmayan Hareket XYZ") == 2.5
+
+
+def _state_with_exercise(name):
+    st = core.default_state()
+    st["program"]["days"] = [{"id": "d1", "name": "G", "exercises": [{"name": name}]}]
+    st["history"] = [
+        {"id": "h1", "startedAt": 1, "exercises": [{"name": name, "sets": [{"weight": 50, "reps": 8}]}]},
+        {"id": "h2", "startedAt": 2, "exercises": [{"name": name, "sets": [{"weight": 55, "reps": 8}]}]},
+    ]
+    st["library"] = [name]
+    st["muscleGroups"] = {name: ["Sırt"]}
+    return st
+
+
+def test_rename_exercise_updates_everywhere_and_keeps_sets():
+    st = _state_with_exercise("Yanlis Isim")
+    ok, _ = core.rename_exercise(st, "Yanlis Isim", "  Dogru Isim ")
+    assert ok
+    assert st["program"]["days"][0]["exercises"][0]["name"] == "Dogru Isim"
+    assert [s["exercises"][0]["name"] for s in st["history"]] == ["Dogru Isim"] * 2
+    assert st["history"][1]["exercises"][0]["sets"][0]["weight"] == 55
+    assert st["library"] == ["Dogru Isim"]
+    assert st["muscleGroups"] == {"Dogru Isim": ["Sırt"]}
+    assert len(core.history_for_exercise(st, "Dogru Isim")) == 2
+    assert core.history_for_exercise(st, "Yanlis Isim") == []
+
+
+def test_rename_exercise_rejects_empty_same_and_conflict():
+    st = _state_with_exercise("A")
+    st["history"][0]["exercises"].append({"name": "B", "sets": []})
+    assert core.rename_exercise(st, "A", "  ")[0] is False
+    assert core.rename_exercise(st, "A", "A")[0] is False
+    assert core.rename_exercise(st, "A", "B")[0] is False
+    assert st["history"][0]["exercises"][0]["name"] == "A"  # hicbir sey degismedi
+
+
+def test_rename_exercise_updates_active_session():
+    st = _state_with_exercise("A")
+    st["activeSession"] = {"exercises": [{"name": "A", "sets": []}]}
+    assert core.rename_exercise(st, "A", "C")[0]
+    assert st["activeSession"]["exercises"][0]["name"] == "C"

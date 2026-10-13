@@ -879,6 +879,44 @@ def set_day_exercise_target(state, day_id, name, target_sets=None, target_reps_m
             active_ex.update({k: v for k, v in obj.items() if k != "name"})
 
 
+def rename_exercise(state, old, new):
+    """Bir hareketin adini HER YERDE (program gunleri, gecmis antrenmanlar,
+    aktif seans, kutuphane listesi, kas grubu eslemesi) toplu olarak
+    degistirir; setler/agirliklar/tarihler aynen kalir. Hareketler gecmise
+    ISIM uzerinden bagli oldugu icin, gecmisi korumanin tek yolu budur.
+
+    Donus: (ok, mesaj). Basarisizsa HICBIR sey degismez (once dogrulama,
+    sonra uygulama). Reddedilen durumlar: bos/ayni isim, ve yeni isim ayni
+    gunde/ayni antrenmanda ZATEN varsa (birlestirmek set verisini karistirir).
+    """
+    new = (new or "").strip()
+    if not new:
+        return False, "Yeni isim boş olamaz."
+    if new == old:
+        return False, "Yeni isim eskisiyle aynı."
+
+    containers = [d["exercises"] for d in state["program"]["days"]]
+    containers += [s["exercises"] for s in state["history"]]
+    if state.get("activeSession"):
+        containers.append(state["activeSession"]["exercises"])
+    for exs in containers:
+        names = {e["name"] for e in exs}
+        if old in names and new in names:
+            return False, f'"{new}" adlı hareket aynı günde/antrenmanda zaten var; önce birini kaldır.'
+
+    for exs in containers:
+        for e in exs:
+            if e["name"] == old:
+                e["name"] = new
+
+    state["library"] = list(dict.fromkeys(new if n == old else n for n in state["library"]))
+    mg = state.get("muscleGroups") or {}
+    if old in mg:
+        groups = mg.pop(old)
+        mg.setdefault(new, groups)
+    return True, "Hareket adı güncellendi."
+
+
 def remove_exercise_from_day(state, day_id, idx):
     day = next(d for d in state["program"]["days"] if d["id"] == day_id)
     day["exercises"].pop(idx)

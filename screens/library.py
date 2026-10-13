@@ -31,15 +31,64 @@ from kivy.app import App
 from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.popup import Popup
 from kivy.metrics import dp
 
 import core
-from shared import MUTED, FAINT, ACCENT, fmt_weight, Card, label, mono_label, exercise_search_input
+from shared import (
+    MUTED, FAINT, ACCENT, RAISED, TEXT, fmt_weight, Card, label, mono_label,
+    exercise_search_input, styled_button, fit_popup_to_content, toast,
+)
+
+
+class _TapCard(ButtonBehavior, Card):
+    """Dokunulabilir hareket satiri (dokununca yeniden adlandirma acilir)."""
 
 
 class LibraryScreen(Screen):
     def on_pre_enter(self):
         self.render()
+
+    def open_rename(self, old_name):
+        """Hareketi yeniden adlandir: core.rename_exercise() adi program,
+        gecmis ve aktif seansta toplu degistirir (gecmis KAYBOLMAZ).
+        Klavye yuzeyi: exercise_search_input() ile ayni tek satirlik
+        TextInput (isim yazmak bir stepper ile yapilamaz)."""
+        app = App.get_running_app()
+        content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+        content.bind(minimum_height=content.setter("height"))
+        content.add_widget(label("Geçmiş kayıtların korunur; ad her yerde değişir.",
+                                 size=13, color=MUTED))
+        name_in = exercise_search_input(hint="Yeni hareket adı")
+        name_in.text = old_name
+        content.add_widget(name_in)
+        row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        popup = Popup(title="Hareketi Yeniden Adlandır", content=content, size_hint=(0.9, None))
+        fit_popup_to_content(popup, content)
+
+        def close():
+            name_in.focus = False
+            popup.dismiss(animation=False)
+
+        def do_save(*_a):
+            ok, msg = core.rename_exercise(app.state, old_name, name_in.text)
+            if ok:
+                app.save()
+                close()
+                self.render()
+            else:
+                toast(app, msg)
+            if ok:
+                toast(app, msg)
+
+        save = styled_button("Kaydet")
+        cancel = styled_button("Vazgeç", color=RAISED, text_color=TEXT)
+        save.bind(on_release=do_save)
+        cancel.bind(on_release=lambda *_a: close())
+        row.add_widget(cancel); row.add_widget(save)
+        content.add_widget(row)
+        popup.open(animation=False)
 
     def render(self):
         app = App.get_running_app()
@@ -75,10 +124,11 @@ class LibraryScreen(Screen):
             for n in filtered:
                 pts = core.history_for_exercise(state, n)
                 pr = max((p["max"] for p in pts), default=0)
-                row = Card(size_hint_y=None, height=dp(58), orientation="horizontal", spacing=dp(8))
+                row = _TapCard(size_hint_y=None, height=dp(58), orientation="horizontal", spacing=dp(8))
+                row.bind(on_release=lambda _w, nm=n: self.open_rename(nm))
                 info = BoxLayout(orientation="vertical")
                 info.add_widget(label(n, size=14, bold=True, height=dp(20)))
-                info.add_widget(mono_label(f"{len(pts)} antrenman", size=14, color=MUTED, height=dp(18)))
+                info.add_widget(mono_label(f"{len(pts)} antrenman · adı değiştirmek için dokun", size=13, color=MUTED, height=dp(18)))
                 row.add_widget(info)
                 pr_col = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(70))
                 # HATA DUZELTMESI: pts bossa (bu harekete hic set girilmemisse - ör.
