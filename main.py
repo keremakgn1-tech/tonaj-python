@@ -68,16 +68,11 @@ def get_data_path():
     return os.path.join(base, "tonaj_state.json")
 
 
-def _write_json_string_to_file(path, payload):
-    """Onceden JSON'a cevrilmis (immutable) bir string'i diske atomik olarak
-    yazar. core.save_state ile ayni "gecici dosya + os.replace" mantigini
-    kullanir; sadece serialize etmeyi cagirandan (arka plan thread'inden
-    guvenli sekilde ayirmak icin) devralmiyor - bkz. TonajApp.save()."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(payload)
-    os.replace(tmp, path)
+def _write_json_string_to_file(path, payload, seq=None):
+    """Onceden JSON'a cevrilmis string'i diske yazar - tum yazimlar
+    (arka plan thread'i + on_pause/on_stop) core.write_json_atomic icindeki
+    TEK kilit altinda siralanir; daha eski bir yuk daha yeniyi ezmez."""
+    return core.write_json_atomic(path, payload, seq)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +283,9 @@ class TonajApp(App):
                 lambda *_: toast(self, "Önceki veri okunamadı, sıfırdan başlandı"), 0)
         return self.root_widget
 
+    def state_path(self):
+        return get_data_path()
+
     def save(self):
         # KOK NEDEN (genel "kasma" sikayeti): save() neredeyse HER tek
         # etkilesimde (set ekleme/silme, gun tasima, egzersiz ekleme/cikarma,
@@ -316,6 +314,10 @@ class TonajApp(App):
         self._save_pending = None
         path = get_data_path()
         try:
+            # Sira numarasi SERIALIZE aninda (ana thread) alinir: sonradan
+            # gelen on_pause/on_stop yazimi daha yuksek numara alir, bu
+            # thread yavas kalirsa eski yuku yazmaz.
+            seq = core.next_write_seq()
             payload = json.dumps(self.state, ensure_ascii=False)
         except Exception:
             # Beklenmedik bir serialize hatasi olursa eski (senkron ama
@@ -333,7 +335,7 @@ class TonajApp(App):
         # aciklayici bir toast gosteriyoruz.
         def write_and_report():
             try:
-                _write_json_string_to_file(path, payload)
+                _write_json_string_to_file(path, payload, seq)
             except Exception as e:
                 print(f"[tonaj] UYARI: diske yazma basarisiz: {e!r}")
                 Clock.schedule_once(
@@ -348,7 +350,13 @@ class TonajApp(App):
         if getattr(self, "_save_pending", None) is not None:
             self._save_pending.cancel()
             self._save_pending = None
-        core.save_state(get_data_path(), self.state)
+        self._safe_final_save()
+
+    def _safe_final_save(self):
+        try:
+            core.save_state(get_data_path(), self.state)
+        except Exception as e:
+            print(f"[tonaj] UYARI: son kayit basarisiz: {e!r}")
 
     def on_pause(self):
         # KOK NEDEN: kullanici Ana Ekran tusuna basip uygulamayi ARKA PLANA
@@ -363,7 +371,7 @@ class TonajApp(App):
         if getattr(self, "_save_pending", None) is not None:
             self._save_pending.cancel()
             self._save_pending = None
-        core.save_state(get_data_path(), self.state)
+        self._safe_final_save()
         return True
 
 

@@ -127,6 +127,14 @@ def to_display_weight(kg_value):
     return kg_value / KG_PER_LB if weight_unit() == "lb" else kg_value
 
 
+def round_display_weight(v):
+    """lb modunda ham donusum (100kg -> 220.462lb) yerine en yakin 0.5 lb'yi
+    gosterir; kg modunda degeri aynen birakir."""
+    if v is None:
+        return None
+    return round(v * 2) / 2 if weight_unit() == "lb" else v
+
+
 def to_storage_kg(display_value):
     """Kullanicinin (secili birimde) girdigi bir sayiyi, depoya yazilacak
     kg degerine cevirir."""
@@ -778,13 +786,18 @@ _DAY_NAME_RE = re.compile(r'^\s*(\d+)\s*\.\s*G[üu]n\s*:\s*(.+?)\s*(?:\(([^)]*)\
 def parse_day_name(name):
     """'1. Gün: İtiş (Göğüs-Omuz-Triceps)' -> ('01', 'İtiş', 'Göğüs-Omuz-Triceps').
     Bu kaliba uymayan (kullanicinin kendi yeniden adlandirdigi) isimler icin
-    ordinal/meta bos doner, headline oldugu gibi kullanilir."""
-    m = _DAY_NAME_RE.match(name)
+    ordinal/meta bos doner, headline oldugu gibi kullanilir.
+    Sondaki " (Kopya)" isaretleri (gunu cogaltinca eklenir) once ayrilir, yoksa
+    "(Göğüs) (Kopya)" icin kas grubu bilgisi kaybolurdu; isaret basliga eklenir."""
+    mc = re.search(r'((?:\s*\(Kopya\))+)\s*$', name)
+    copies = mc.group(1).strip() if mc else ""
+    base = name[:mc.start()] if mc else name
+    m = _DAY_NAME_RE.match(base)
     if m:
         ordinal = m.group(1).zfill(2)
         headline = m.group(2).strip()
         meta = m.group(3).strip() if m.group(3) else None
-        return ordinal, headline, meta
+        return ordinal, (headline + " " + copies).strip(), meta
     return None, name, None
 
 

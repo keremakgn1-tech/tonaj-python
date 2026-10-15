@@ -30,6 +30,7 @@ from shared import (
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
     toast, target_label, _find_scrollview, exercise_search_input, note_input,
+    round_display_weight,
 )
 
 
@@ -227,7 +228,10 @@ class ProgramScreen(Screen):
             add_ex.bind(on_release=lambda *_: self.open_exercise_picker(day["id"]))
             actions.add_widget(add_ex)
         deload = Button(text="Deload", background_color=TRANSPARENT, color=MUTED, font_size=sp_(13), size_hint_x=None, width=dp(70))
-        deload.bind(on_release=lambda *_: self.start_session(day["id"], is_deload=True))
+        deload.bind(on_release=lambda *_: confirm_dialog(
+            "Deload Antrenmanı",
+            "Deload (hafif) antrenman başlatılsın mı? Set sayıları yaklaşık %60'a düşer, ağırlık önerisi yapılmaz.",
+            lambda: self.start_session(day["id"], is_deload=True), confirm_text="Başlat"))
         actions.add_widget(deload)
         actions.add_widget(BoxLayout())
         start = Button(text="BAŞLA", font_name="Oswald", font_size=sp_(15),
@@ -523,18 +527,28 @@ class ProgramScreen(Screen):
         # targetWeight depoda HER ZAMAN kg - kullaniciya kendi sectigi birimde
         # gosteriyoruz, kaydederken (asagida do_save icinde) tekrar kg'ye ceviriyoruz.
         w_step = 2.5 if weight_unit() == "kg" else 5
-        w_i = make_stepper(f"Ağırlık ({weight_unit()})", to_display_weight(existing.get("targetWeight")),
+        w_i = make_stepper(f"Ağırlık ({weight_unit()})", round_display_weight(to_display_weight(existing.get("targetWeight"))),
                             step=w_step, decimals=True)
         rir_i = make_stepper("RIR", existing.get("targetRIR"), step=1, max_val=10)
         rest_i = make_stepper("Dinlenme (sn)", existing.get("restSeconds"), step=15)
+        # KOK NEDEN (detayli incelemede bulundu): 6 stepper + not alani ~610dp,
+        # telefon penceresinde (ozellikle not klavyesi acikken) popup'in
+        # alabilecegi yuksekligi asiyor, baslik/Geri/Kaydet kirpiliyordu.
+        # DUZELTME: stepper'lar kaydirilabilir bir govdede; baslik satiri ve
+        # Kaydet butonu sabit kaliyor, govde mevcut yukseklige gore kisaliyor.
+        inner = BoxLayout(orientation="vertical", spacing=dp(8), size_hint_y=None)
+        inner.bind(minimum_height=inner.setter("height"))
+        body = ScrollView(size_hint_y=None, do_scroll_x=False, bar_width=dp(3))
+        body.add_widget(inner)
+        content.add_widget(body)
         for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
-            content.add_widget(w)
+            inner.add_widget(w)
 
         # UX (kullanicidan gelen istek - "bazı hareketlere not eklemek
         # istiyorum") - bkz. shared.note_input()'taki KOK NEDEN notu.
-        content.add_widget(label("Not", size=12, color=MUTED, height=dp(16)))
+        inner.add_widget(label("Not", size=12, color=MUTED, height=dp(16)))
         note_i = note_input(text=existing.get("note") or "")
-        content.add_widget(note_i)
+        inner.add_widget(note_i)
 
         # KOK NEDEN (kullanicinin gonderdigi ekran goruntusunde "‹ Geri"
         # kutusu duzgun ama hemen yanindaki hareket adi ve altindaki alanlar
@@ -580,6 +594,9 @@ class ProgramScreen(Screen):
             return cast(value)
 
         def do_save(*_):
+            if rmin_i.value and rmax_i.value and rmin_i.value > rmax_i.value:
+                toast(app, "Tekrar min, tekrar max'tan büyük olamaz")
+                return
             core.set_day_exercise_target(
                 state, day["id"], name,
                 target_sets=to_num(sets_i.value), target_reps_min=to_num(rmin_i.value),
@@ -599,13 +616,29 @@ class ProgramScreen(Screen):
             # baska bir hareketin hedefini acarsa, eski (hala solmakta olan)
             # Hedef popup'i ile yenisi ust uste binmesin.
             popup.dismiss(animation=False)
-            self.render()
+            self.render(keep_scroll=True)
 
         save_btn.bind(on_release=do_save)
         content.add_widget(save_btn)
         # content ARTIK TAMAMEN HAZIR (title_row + 6 stepper + Kaydet) -
         # Popup'i ve boyutunu SIMDI, TEK SEFERDE olusturuyoruz.
         popup = Popup(title="Hedef", content=content, size_hint=(0.9, None))
+        from kivy.core.window import Window as _Win
+
+        def fit_body(*_):
+            # popup'in alabilecegi toplam yukseklikten sabit parcalari
+            # (popup basligi/kenarliklar payi, baslik satiri, Kaydet, bosluklar)
+            # cikarip kalani govdeye ver.
+            fixed = dp(72) + title_row.height + save_btn.height + dp(10) * 2 + dp(8) * 2
+            avail = _Win.height * 0.9 - fixed
+            body.height = max(dp(120), min(inner.height, avail))
+
+        def unbind_fit_body(*_):
+            _Win.unbind(size=fit_body)
+        inner.bind(height=fit_body)
+        _Win.bind(size=fit_body)
+        popup.bind(on_dismiss=unbind_fit_body)
+        fit_body()
         fit_popup_to_content(popup, content)
         # animation=False: Popup.open() de VARSAYILAN olarak solarak
         # (alpha 0->1) acilir - bu popup ozellikle arama+klavye akisindan
@@ -624,7 +657,6 @@ class ProgramScreen(Screen):
         self.render()
 
     def render_active_session(self, state):
-        app = App.get_running_app()
         sess = state["activeSession"]
         scroll = ScrollView()
         col = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(12), padding=dp(12))
@@ -632,8 +664,8 @@ class ProgramScreen(Screen):
 
         header = Card(size_hint_y=None, height=dp(92), spacing=dp(2))
         title_row = BoxLayout(size_hint_y=None, height=dp(22))
-        title_row.add_widget(label(sess["dayName"] or "Serbest Antrenman", size=14, bold=True, color=MUTED))
-        if sess["isDeload"]:
+        title_row.add_widget(label(sess.get("dayName") or "Serbest Antrenman", size=14, bold=True, color=MUTED))
+        if sess.get("isDeload"):
             deload_tag = Label(text="DELOAD", font_name="Oswald", font_size=sp_(13), bold=True,
                                 color=ACCENT_DARK, size_hint=(None, None), size=(dp(62), dp(18)))
             bg_rect(deload_tag, ACCENT)
@@ -655,7 +687,7 @@ class ProgramScreen(Screen):
         col.add_widget(add_ex)
 
         finish = styled_button("Antrenmanı Bitir ve Kaydet")
-        finish.bind(on_release=lambda *_: (core.finish_session(state), app.save(), toast(app, "ANTRENMAN KAYDEDİLDİ"), self.render()))
+        finish.bind(on_release=lambda *_: self.finish_session_ui())
         col.add_widget(finish)
 
         discard = styled_button("Antrenmanı Sil", color=(0.2, 0.1, 0.1, 1), text_color=DANGER)
@@ -664,6 +696,25 @@ class ProgramScreen(Screen):
 
         scroll.add_widget(col)
         return scroll
+
+    def finish_session_ui(self):
+        """Antrenmani bitirir. Hic CALISMA seti girilmediyse (bos ya da sadece
+        isinma) gecmise kayit dusmeyecegi icin once onay ister; toast gercegi soyler."""
+        app = App.get_running_app()
+
+        def do_finish():
+            saved = core.finish_session(app.state)
+            app.save()
+            toast(app, "ANTRENMAN KAYDEDİLDİ" if saved else "Çalışma seti olmadığı için kaydedilmedi")
+            self.render()
+
+        if core.session_has_working_sets(app.state.get("activeSession")):
+            do_finish()
+        else:
+            confirm_dialog(
+                "Antrenmanı Bitir",
+                "Hiç çalışma seti girmedin. Antrenman geçmişe KAYDEDİLMEDEN kapatılacak. Devam edilsin mi?",
+                do_finish, confirm_text="Evet, Kapat")
 
     def confirm_discard_session(self):
         # KOK NEDEN (yanlislikla dokunma riski): bu buton ONCEDEN hicbir onay
@@ -691,9 +742,12 @@ class ProgramScreen(Screen):
         app = App.get_running_app()
 
         def on_pick(name):
-            core.add_exercise_to_session(app.state, name)
-            app.save()
-            self.render()
+            added = core.add_exercise_to_session(app.state, name)
+            if added:
+                app.save()
+            else:
+                toast(app, "Bu hareket zaten antrenmanda")
+            self.render(keep_scroll=True)
 
         self._build_exercise_picker("Hareket Ekle", on_pick)
 
@@ -738,6 +792,10 @@ class ProgramScreen(Screen):
         # SABITTIR. Tekrar tekrar hesaplamak yerine BIR KEZ hesaplayip
         # closure'da saklıyoruz.
         prev_max = core.max_weight_for(state, ex["name"])
+        # Son girilen CALISMA seti degerleri (gosterim biriminde): her setten sonra
+        # form oneriye/hedefe geri donmesin, kullanici ayni degerleri tekrar tekrar
+        # girmek zorunda kalmasin.
+        last = {"w": None, "r": None, "rir": None}
 
         def rebuild(*_):
             card.clear_widgets()
@@ -784,9 +842,12 @@ class ProgramScreen(Screen):
                 note_lbl.bind(height=lambda _w, h: setattr(note_row, "height", max(dp(30), h)))
                 card.add_widget(note_row)
 
+            work_no = 0
             for si, s in enumerate(ex["sets"]):
                 row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(6))
-                flag = "ISI" if s.get("isWarmup") else str(si + 1)
+                if not s.get("isWarmup"):
+                    work_no += 1
+                flag = "ISI" if s.get("isWarmup") else str(work_no)
                 row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
                 row.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
                                            color=FAINT if s.get("isWarmup") else TEXT))
@@ -807,6 +868,9 @@ class ProgramScreen(Screen):
             # Set eklerken kullanilan agirlik/tekrar/RIR alanlari - klavye
             # acmayan +/- sayaci (bkz. make_stepper() tanimindaki not).
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
+            _w0 = last["w"] if last["w"] is not None else round_display_weight(to_display_weight(_sw))
+            _r0 = last["r"] if last["r"] is not None else ex.get("targetRepsMin")
+            _rir0 = last["rir"] if last["rir"] is not None else ex.get("targetRIR")
             w_step = 2.5 if weight_unit() == "kg" else 5
             form = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
             # max_val: sayaç mekanizmasında (make_stepper/make_hold) olası bir
@@ -814,15 +878,15 @@ class ProgramScreen(Screen):
             # ek bir güvenlik siniri - gercek dunya agirliklarinin cok
             # üzerinde bir tavan.
             w_max = 500 if weight_unit() == "kg" else 1100
-            w_stepper = make_stepper(f"Ağırlık ({weight_unit()})", to_display_weight(_sw),
+            w_stepper = make_stepper(f"Ağırlık ({weight_unit()})", _w0,
                                       step=w_step, decimals=True, max_val=w_max)
-            r_stepper = make_stepper("Tekrar", ex.get("targetRepsMin"), step=1)
+            r_stepper = make_stepper("Tekrar", _r0, step=1)
             form.add_widget(w_stepper)
             form.add_widget(r_stepper)
             card.add_widget(form)
 
             extra = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
-            rir_stepper = make_stepper("RIR", ex.get("targetRIR"), step=1, max_val=10, btn_width=dp(36))
+            rir_stepper = make_stepper("RIR", _rir0, step=1, max_val=10, btn_width=dp(36))
             rir_stepper.size_hint_x = 0.4
             warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.6, background_normal="", background_down="", background_color=RAISED, color=TEXT)
             extra.add_widget(rir_stepper)
@@ -835,14 +899,23 @@ class ProgramScreen(Screen):
             def submit(*_):
                 w = w_stepper.value
                 r = r_stepper.value
-                if not w or not r:
+                # 0 kg GECERLI (barfiks/dips/sinav gibi vucut agirligi hareketleri);
+                # sadece bos agirlik ya da 0 tekrar reddedilir.
+                if w is None or not r:
                     toast(app, "Geçerli değer gir")
                     return
                 rir = int(rir_stepper.value) if rir_stepper.value is not None else None
+                is_warm = warm_toggle.state == "down"
                 # Kullanici agirligi kendi sectigi birimde (kg ya da lb) girdi -
                 # depoya HER ZAMAN kg olarak yaziyoruz (bkz. dosyanin basindaki
                 # birim-sistemi notu).
-                is_pr = core.add_set(state, idx, to_storage_kg(w), int(r), is_warmup=warm_toggle.state == "down", rir=rir)
+                try:
+                    is_pr = core.add_set(state, idx, to_storage_kg(w), int(r), is_warmup=is_warm, rir=rir)
+                except ValueError:
+                    toast(app, "Geçerli değer gir")
+                    return
+                if not is_warm:
+                    last.update(w=w, r=int(r), rir=rir)
                 app.save()
                 if is_pr:
                     toast(app, "YENİ REKOR — PR!")

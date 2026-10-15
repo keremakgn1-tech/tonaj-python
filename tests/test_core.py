@@ -107,8 +107,9 @@ def test_load_state_recovers_when_json_is_not_a_dict(tmp_path):
     assert state["history"] == []
 
 
-def test_load_state_recovers_when_schema_is_invalid(tmp_path):
-    # gecerli JSON + dict, ama ic yapi bozuk (sets bir liste degil)
+def test_load_state_repairs_minor_inner_problems_without_losing_data(tmp_path):
+    # ic yapida kucuk hata (sets liste degil): eskiden TUM dosya kenara alinip
+    # veri kayboluyordu; artik onarilir ve gecmis korunur.
     path = str(tmp_path / "tonaj_state.json")
     import json
     bad = core.default_state()
@@ -119,7 +120,21 @@ def test_load_state_recovers_when_schema_is_invalid(tmp_path):
         json.dump(bad, f)
 
     state, is_new, recovered = core.load_state(path)
+    assert recovered is False
+    assert len(state["history"]) == 1
+    assert state["history"][0]["exercises"][0]["sets"] == []
+
+
+def test_load_state_recovers_when_structure_is_invalid(tmp_path):
+    path = str(tmp_path / "tonaj_state.json")
+    import json
+    bad = core.default_state()
+    bad["history"] = "liste degil"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(bad, f)
+    state, is_new, recovered = core.load_state(path)
     assert recovered is True
+    assert state["history"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -705,3 +720,225 @@ def test_rename_exercise_updates_active_session():
     st["activeSession"] = {"exercises": [{"name": "A", "sets": []}]}
     assert core.rename_exercise(st, "A", "C")[0]
     assert st["activeSession"]["exercises"][0]["name"] == "C"
+
+
+# ---------------------------------------------------------------------------
+# Detayli inceleme duzeltmeleri (veri guvenligi + cekirdek mantik)
+# ---------------------------------------------------------------------------
+import json as _json
+import threading as _threading
+
+
+def test_save_state_bare_filename_works(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    core.save_state("s.json", core.default_state())
+    assert (tmp_path / "s.json").exists()
+
+
+def test_save_state_keeps_bak_of_previous_good_file(tmp_path):
+    path = str(tmp_path / "st.json")
+    a = core.default_state(); a["library"] = ["ilk"]
+    core.save_state(path, a)
+    b = core.default_state(); b["library"] = ["ikinci"]
+    core.save_state(path, b)
+    with open(path + ".bak", encoding="utf-8") as f:
+        assert _json.load(f)["library"] == ["ilk"]
+
+
+def test_load_state_falls_back_to_bak_when_main_is_truncated(tmp_path):
+    path = str(tmp_path / "st.json")
+    a = core.default_state(); a["library"] = ["ilk"]
+    core.save_state(path, a)
+    b = core.default_state(); b["library"] = ["ikinci"]
+    core.save_state(path, b)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("")  # yarim kalmis/bos dosya
+    state, is_new, recovered = core.load_state(path)
+    assert state["library"] == ["ilk"] and recovered is True and is_new is False
+
+
+def test_stale_write_does_not_overwrite_newer(tmp_path):
+    path = str(tmp_path / "st.json")
+    old_seq = core.next_write_seq()
+    new_seq = core.next_write_seq()
+    assert core.write_json_atomic(path, '{"v": "yeni"}', new_seq) is True
+    assert core.write_json_atomic(path, '{"v": "eski"}', old_seq) is False
+    with open(path, encoding="utf-8") as f:
+        assert _json.load(f) == {"v": "yeni"}
+
+
+def test_concurrent_saves_always_leave_valid_json(tmp_path):
+    path = str(tmp_path / "st.json")
+    def work(n):
+        for i in range(20):
+            st = core.default_state(); st["library"] = [f"t{n}-{i}"]
+            core.save_state(path, st)
+    ts = [_threading.Thread(target=work, args=(n,)) for n in range(4)]
+    [t.start() for t in ts]; [t.join() for t in ts]
+    with open(path, encoding="utf-8") as f:
+        assert isinstance(_json.load(f), dict)
+    assert not [f for f in os.listdir(tmp_path) if f.endswith(".tmp")]
+
+
+def test_load_state_out_of_range_font_scale_is_repaired_not_wiped(tmp_path):
+    path = str(tmp_path / "st.json")
+    st = core.default_state()
+    st["settings"]["fontScale"] = 3
+    st["history"] = [{"id": "h", "startedAt": 5, "exercises": [{"name": "A", "sets": [{"weight": 5, "reps": 5}]}]}]
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(st, f)
+    loaded, _, recovered = core.load_state(path)
+    assert recovered is False
+    assert loaded["settings"]["fontScale"] == 1.0
+    assert len(loaded["history"]) == 1
+
+
+def test_load_state_never_overwrites_file_it_cannot_move(tmp_path, monkeypatch):
+    path = str(tmp_path / "st.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("{bozuk")
+    monkeypatch.setattr(core.os, "replace", lambda *a, **k: (_ for _ in ()).throw(OSError("x")))
+    state, _, recovered = core.load_state(path)
+    assert recovered is True
+    with open(path, encoding="utf-8") as f:
+        assert f.read() == "{bozuk"          # orijinale dokunulmadi
+    monkeypatch.undo()
+    core._SAVE_BLOCKED.discard(path)
+
+
+def test_sanitize_state_fills_missing_keys_and_none_weights():
+    raw = {"history": [{"exercises": [{"name": " Squat ", "sets": [
+        {"weight": None, "reps": 5}, {"reps": 3}, {"weight": 50}, "x"]}]}],
+        "program": {"days": []}, "library": [], "activeSession": None}
+    st = core.sanitize_state(raw)
+    sess = st["history"][0]
+    assert sess["id"] and sess["startedAt"] == 0
+    assert sess["exercises"][0]["name"] == "Squat"
+    assert [s["weight"] for s in sess["exercises"][0]["sets"]] == [0.0, 0.0]  # tekrari olmayanlar atildi
+    assert st["muscleGroups"] and st["bodyweightLog"] == [] and st["settings"]["weightUnit"] == "kg"
+    assert core.session_tonnage(sess) == 0.0   # artik cokmuyor
+    core.validate_state_schema(st)
+
+
+def test_prepare_import_rejects_non_tonaj_json_and_repairs_old_backup():
+    import pytest
+    with pytest.raises(ValueError, match="eksik alan"):
+        core.prepare_import({"foo": 1})
+    old = {"history": [], "program": {"days": [{"id": "d", "name": "G", "exercises": [{"name": "A"}]}]},
+           "library": [], "activeSession": None}      # muscleGroups/settings/bodyweightLog yok
+    st = core.prepare_import(old)
+    core.set_day_exercise_target(st, "d", "A", muscle_groups=["Sırt"])   # eskiden KeyError
+    assert st["muscleGroups"]["A"] == ["Sırt"]
+
+
+def test_make_safety_copy_keeps_only_last_three(tmp_path):
+    path = str(tmp_path / "st.json")
+    core.save_state(path, core.default_state())
+    import time as _t
+    for i in range(5):
+        core.make_safety_copy(path, "pre-import")
+        _t.sleep(1.01)
+    copies = [f for f in os.listdir(tmp_path) if ".pre-import-" in f]
+    assert len(copies) == 3
+
+
+def test_start_session_does_not_discard_active_session():
+    st = core.default_state()
+    st["program"]["days"] = [{"id": "d", "name": "n", "exercises": [{"name": "Squat"}]}]
+    core.start_session(st, "d")
+    core.add_set(st, 0, 100, 5)
+    again = core.start_session(st, "d")
+    assert again is st["activeSession"]
+    assert len(st["activeSession"]["exercises"][0]["sets"]) == 1
+
+
+def test_add_set_zero_weight_ok_but_invalid_rejected():
+    import pytest
+    st = core.default_state()
+    core.start_session(st); core.add_exercise_to_session(st, "Chin-up")
+    core.add_set(st, 0, 0, 8)                       # vucut agirligi
+    with pytest.raises(ValueError):
+        core.add_set(st, 0, -5, 8)
+    with pytest.raises(ValueError):
+        core.add_set(st, 0, 20, 0)
+    assert len(st["activeSession"]["exercises"][0]["sets"]) == 1
+
+
+def test_exercise_names_are_normalized_and_case_resolved():
+    st = core.default_state()
+    core.start_session(st)
+    assert core.add_exercise_to_session(st, "squat ") is True
+    assert core.add_exercise_to_session(st, "  SQUAT") is False
+    assert [e["name"] for e in st["activeSession"]["exercises"]] == ["Squat"]
+
+
+def test_finish_session_without_working_sets_is_not_saved():
+    st = core.default_state()
+    st["program"]["days"] = [{"id": "d", "name": "n", "exercises": [{"name": "Squat"}]}]
+    core.start_session(st, "d")
+    assert core.finish_session(st) is False and st["history"] == [] and st["activeSession"] is None
+    core.start_session(st, "d"); core.add_set(st, 0, 60, 5, is_warmup=True)
+    assert core.finish_session(st) is False and st["history"] == []
+    core.start_session(st, "d"); core.add_set(st, 0, 60, 5)
+    assert core.finish_session(st) is True and len(st["history"]) == 1
+
+
+def test_rename_keeps_increment_category_and_hides_renamed_default():
+    st = _state_with_exercise("Barbell Curl")           # hazir, izolasyon (1.25)
+    ok, _ = core.rename_exercise(st, "Barbell Curl", "Benim Curl")
+    assert ok
+    assert core.increment_for("Benim Curl", st) == 1.25
+    assert "Barbell Curl" not in core.all_exercise_names(st)
+    assert core.rename_exercise(st, "Benim Curl", "Barbell Curl")[0]   # geri donunce tekrar gorunur
+    assert "Barbell Curl" in core.all_exercise_names(st)
+
+
+def test_rename_to_case_variant_merges_into_existing_name():
+    st = _state_with_exercise("squat")
+    ok, _ = core.rename_exercise(st, "squat", "SQUAT ")
+    assert ok and st["history"][0]["exercises"][0]["name"] == "Squat"
+
+
+def test_weekly_trend_survives_dst_timezone(monkeypatch):
+    import time as _t
+    monkeypatch.setenv("TZ", "Europe/Berlin"); _t.tzset()
+    try:
+        st = core.default_state()
+        sess_ts = int(datetime_ts(2026, 10, 20, 12))
+        st["history"] = [{"id": "a", "startedAt": sess_ts, "exercises": [
+            {"name": "A", "sets": [{"weight": 100, "reps": 10}]}]}]
+        trend = core.weekly_tonnage_trend(st, weeks=3, now_ms_value=sess_ts + 3 * 86400 * 1000)
+        assert sum(p["tonnage"] for p in trend) == 1000.0
+    finally:
+        monkeypatch.delenv("TZ"); _t.tzset()
+
+
+def datetime_ts(y, m, d, h):
+    from datetime import datetime as _dt
+    return _dt(y, m, d, h).timestamp() * 1000
+
+
+def test_suggested_weight_ignores_light_backoff_sets():
+    st = core.default_state()
+    st["history"] = [{"id": "a", "startedAt": 2, "exercises": [{"name": "Bench Press", "sets": [
+        {"weight": 100, "reps": 6}, {"weight": 60, "reps": 12}]}]}]
+    r = core.suggested_weight_for(st, "Bench Press", 6, 8)
+    assert r["weight"] == 100 and r["reason"] == "inrange"
+
+
+def test_history_order_does_not_depend_on_list_order():
+    st = core.default_state()
+    new = {"id": "n", "startedAt": 200, "exercises": [{"name": "A", "sets": [{"weight": 60, "reps": 8}]}]}
+    old = {"id": "o", "startedAt": 100, "exercises": [{"name": "A", "sets": [{"weight": 50, "reps": 8}]}]}
+    st["history"] = [old, new]        # bozuk sira
+    assert [p["max"] for p in core.history_for_exercise(st, "A")] == [50, 60]
+    assert core.suggested_weight_for(st, "A", 8, 8)["weight"] == 62.5
+
+
+def test_set_day_exercise_target_copies_muscle_group_list():
+    st = core.default_state()
+    st["program"]["days"] = [{"id": "d", "name": "n", "exercises": []}]
+    groups = ["Sırt"]
+    core.set_day_exercise_target(st, "d", "A", muscle_groups=groups)
+    groups.append("Biceps")
+    assert st["muscleGroups"]["A"] == ["Sırt"]

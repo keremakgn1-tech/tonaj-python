@@ -150,7 +150,11 @@ class SettingsScreen(Screen):
         app = App.get_running_app()
 
         def on_confirm():
+            # Geri alinamaz islemden ONCE bellekteki en guncel verinin
+            # otomatik guvenlik kopyasi (son 3 tanesi saklanir).
+            core.make_safety_copy(app.state_path(), "pre-reset", state=app.state)
             app.state = core.default_state()
+            app.state["muscleGroups"] = dict(core.MUSCLE_GROUP_DEFAULTS)
             app.save()
             self.render()
             toast(app, "Tüm veriler sıfırlandı")
@@ -159,7 +163,8 @@ class SettingsScreen(Screen):
             "Tüm Verileri Sıfırla",
             "TÜM programın, antrenman geçmişin ve ayarların KALICI olarak "
             "silinecek. Bu işlem GERİ ALINAMAZ. Devam etmeden önce yedek "
-            "almanı öneririz.",
+            "almanı öneririz. (Güvenlik için son hali telefonda otomatik "
+            "saklanır.)",
             on_confirm, confirm_text="Evet, Sıfırla")
 
     # ------------------------------------------------------------------
@@ -214,7 +219,7 @@ class SettingsScreen(Screen):
                 try:
                     uri = data_intent.getData()
                     resolver = PythonActivity.mActivity.getContentResolver()
-                    out_stream = resolver.openOutputStream(uri)
+                    out_stream = resolver.openOutputStream(uri, "wt")
                     out_stream.write(payload)
                     out_stream.flush()
                     out_stream.close()
@@ -246,12 +251,31 @@ class SettingsScreen(Screen):
     # okuyup MEVCUT tum uygulama verisinin (program, gecmis, hareketler...)
     # YERINE koyar. Yikici bir islem oldugu icin once onay istiyoruz.
     # ------------------------------------------------------------------
+    MAX_IMPORT_BYTES = 20 * 1024 * 1024
+
+    def apply_import(self, raw):
+        """Secilen yedegin ham baytlarini dogrulayip mevcut verinin YERINE koyar.
+        Hata olursa mevcut veriye DOKUNMAZ, Turkce bir toast gosterir."""
+        app = App.get_running_app()
+        try:
+            data = json.loads(raw.decode("utf-8-sig"))
+            new_state = core.prepare_import(data)
+        except (ValueError, UnicodeDecodeError) as e:
+            toast(app, f"Geri yükleme hatası: {e}")
+            return
+        core.make_safety_copy(app.state_path(), "pre-import", state=app.state)
+        app.state = new_state
+        app.save()
+        self.render()
+        toast(app, "Yedek geri yüklendi")
+
     def confirm_import_backup(self):
         confirm_dialog(
             "Yedekten Geri Yükle",
             "Bir yedek dosyası seçeceksin. Seçtiğin dosyadaki veri, bu "
             "cihazdaki TÜM mevcut programın/geçmişin/kayıtların YERİNE "
-            "geçecek. Bu işlem geri alınamaz. Devam edilsin mi?",
+            "geçecek. (Güvenlik için mevcut verinin son hali telefonda otomatik "
+            "saklanır.) Devam edilsin mi?",
             self.import_backup, confirm_text="Devam Et")
 
     def import_backup(self):
@@ -295,38 +319,21 @@ class SettingsScreen(Screen):
                     buffered = BufferedInputStream(input_stream)
                     byte_out = ByteArrayOutputStream()
                     chunk = bytearray(8192)
+                    total = 0
                     while True:
                         n = buffered.read(chunk, 0, len(chunk))
                         if n == -1:
                             break
+                        total += n
+                        if total > self.MAX_IMPORT_BYTES:
+                            buffered.close()
+                            raise ValueError("dosya çok büyük (en fazla 20 MB) - yanlış dosyayı seçmiş olabilirsin")
                         byte_out.write(chunk, 0, n)
                     raw = bytes(byte_out.toByteArray())
                     buffered.close()
-
-                    new_state = json.loads(raw.decode("utf-8"))
-                    # KOK NEDEN (kod incelemesinde bulundu - "ice aktarilan
-                    # yedegin ic yapisi dogrulanmiyor"): burada ONCEDEN
-                    # SADECE 4 ust-seviye anahtarin VAR OLUP OLMADIGINA
-                    # bakiliyordu - ic yapi (orn. her set'teki weight/reps
-                    # alanlarinin sayisal olmasi) hic kontrol edilmiyordu.
-                    # Bozuk/elle duzenlenmis bir yedek boylece "gecerli"
-                    # kabul edilip app.state'e atanabiliyor, SONRA
-                    # session_tonnage gibi fonksiyonlarda anlasilmaz bir
-                    # cokmeye yol aciyordu. core.validate_state_schema artik
-                    # bunu daha kapsamli kontrol edip aciklayici bir
-                    # ValueError firlatiyor (asagidaki except tarafindan
-                    # yakalanip kullaniciya Turkce gosteriliyor).
-                    core.validate_state_schema(new_state)
-
-                    new_state.setdefault("settings", {})
-                    new_state["settings"]["lastBackupAt"] = new_state["settings"].get("lastBackupAt")
-                    app.state = new_state
-                    app.save()
-
-                    def _done(*_):
-                        self.render()
-                        toast(app, "Yedek geri yüklendi")
-                    Clock.schedule_once(_done)
+                    # Isleme (JSON parse + state degistirme) Android UI
+                    # thread'inde DEGIL, Kivy ana thread'inde yapilir.
+                    Clock.schedule_once(lambda *_: self.apply_import(raw))
                 except Exception as e:
                     # bkz. export_backup()'taki ayni desendeki not: Clock
                     # tarafindan sonra cagrilacak bir lambda "except as e"

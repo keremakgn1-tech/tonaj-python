@@ -4,8 +4,12 @@ Tonaj - cekirdek veri modeli ve is mantigi.
 Bu modul Kivy'ye BAGIMLI DEGIL - amac, arayuzden bagimsiz olarak duz Python ile
 test edilebilmesi. main.py (Kivy arayuzu) bu modulu kullanir.
 """
+import copy
+import itertools
 import json
 import os
+import shutil
+import threading
 import uuid
 import time
 from datetime import datetime, timedelta
@@ -460,9 +464,25 @@ MUSCLE_GROUP_DEFAULTS = {
 }
 
 
-def increment_for(name):
-    cat = EXERCISE_INCREMENT.get(name, "compound")
-    return INCREMENT_CATEGORIES[cat]
+def increment_category_for(name, state=None):
+    """Hareketin artis kategorisi: once kullanicinin yeniden adlandirmayla
+    tasidigi (state["incrementOverrides"]) deger, sonra sabit tablo, yoksa
+    "compound"."""
+    if state is not None:
+        cat = (state.get("incrementOverrides") or {}).get(name)
+        if cat in INCREMENT_CATEGORIES:
+            return cat
+    return EXERCISE_INCREMENT.get(name, "compound")
+
+
+def increment_for(name, state=None):
+    return INCREMENT_CATEGORIES[increment_category_for(name, state)]
+
+
+def clean_name(name):
+    """Hareket adini normallestirir: bas/son bosluklari atar, ic bosluklari
+    teke indirir ("Squat " ve "Squat  Press" gibi gorunmez farklar olmasin)."""
+    return " ".join(str(name or "").split())
 
 
 def uid():
@@ -518,6 +538,8 @@ def default_state():
         "library": [],
         "program": {"days": []},
         "muscleGroups": {},
+        "incrementOverrides": {},
+        "hiddenDefaults": [],
         "bodyweightLog": [],
         "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0},
     }
@@ -603,74 +625,297 @@ def validate_state_schema(data):
         check_exercises(data["activeSession"].get("exercises", []), "activeSession")
 
 
+def _num(v):
+    """Sayisal degeri float'a cevirir; cevrilemezse None."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v.replace(",", "."))
+        except ValueError:
+            return None
+    return None
+
+
+def _sanitize_sets(sets):
+    out = []
+    if not isinstance(sets, list):
+        return out
+    for st in sets:
+        if not isinstance(st, dict):
+            continue
+        reps = _num(st.get("reps"))
+        if reps is None or reps < 0:
+            continue  # tekrari olmayan set anlamsiz - at
+        weight = _num(st.get("weight"))
+        st = dict(st)
+        st["weight"] = weight if (weight is not None and weight >= 0) else 0.0
+        st["reps"] = int(reps)
+        out.append(st)
+    return out
+
+
+def _sanitize_exercises(exs):
+    out = []
+    if not isinstance(exs, list):
+        return out
+    for ex in exs:
+        if not isinstance(ex, dict):
+            continue
+        name = clean_name(ex.get("name"))
+        if not name:
+            continue
+        ex = dict(ex)
+        ex["name"] = name
+        ex["sets"] = _sanitize_sets(ex.get("sets", []))
+        out.append(ex)
+    return out
+
+
+def _sanitize_session(sess):
+    sess = dict(sess)
+    if not sess.get("id"):
+        sess["id"] = uid()
+    started = _num(sess.get("startedAt"))
+    sess["startedAt"] = int(started) if started is not None else 0
+    sess["exercises"] = _sanitize_exercises(sess.get("exercises", []))
+    return sess
+
+
+def sanitize_state(data):
+    """Diskten okunan ya da ice aktarilan bir state'i ONARIR: eksik
+    anahtarlari varsayilanlarla doldurur, kucuk tip/aralik hatalarini
+    (bos agirlik, gecersiz yazi boyutu, adsiz hareket, eksik startedAt vb.)
+    veriyi ATMADAN duzeltir. Yapisal olarak kurtarilamaz durumlar (history
+    liste degil vb.) icin ValueError birakir - onu validate_state_schema()
+    yakalar. Girdiyi DEGISTIRMEZ, yeni bir dict dondurur.
+
+    KOK NEDEN: eskiden tek bir alandaki kucuk hata (orn. fontScale=3 ya da
+    weight=null) tum dosyanin "bozuk" sayilip kenara alinmasina, ya da import
+    edilen eksik bir yedegin sonradan KeyError ile cokmesine yol aciyordu.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(f"beklenen bir obje (dict), gelen: {type(data).__name__}")
+    st = default_state()
+    for k, v in data.items():
+        st[k] = copy.deepcopy(v)
+
+    base_settings = default_state()["settings"]
+    raw_settings = data.get("settings")
+    settings = dict(base_settings)
+    if isinstance(raw_settings, dict):
+        settings.update(copy.deepcopy(raw_settings))
+    fs = _num(settings.get("fontScale"))
+    settings["fontScale"] = fs if (fs is not None and 0.5 <= fs <= 2.0) else 1.0
+    if settings.get("weightUnit") not in ("kg", "lb"):
+        settings["weightUnit"] = "kg"
+    st["settings"] = settings
+
+    if not isinstance(st.get("muscleGroups"), dict) or not st["muscleGroups"]:
+        st["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
+    if not isinstance(st.get("incrementOverrides"), dict):
+        st["incrementOverrides"] = {}
+    if not isinstance(st.get("hiddenDefaults"), list):
+        st["hiddenDefaults"] = []
+    if not isinstance(st.get("bodyweightLog"), list):
+        st["bodyweightLog"] = []
+
+    if isinstance(st["history"], list):
+        st["history"] = [_sanitize_session(s) for s in st["history"] if isinstance(s, dict)]
+    if isinstance(st["library"], list):
+        st["library"] = [clean_name(n) for n in st["library"] if clean_name(n)]
+    prog = st.get("program")
+    if isinstance(prog, dict) and isinstance(prog.get("days"), list):
+        days = []
+        for d in prog["days"]:
+            if not isinstance(d, dict):
+                continue
+            d = dict(d)
+            d.setdefault("id", uid())
+            d.setdefault("name", "Gün")
+            d["exercises"] = [
+                dict(e, name=clean_name(e.get("name")))
+                for e in d.get("exercises", []) if isinstance(e, dict) and clean_name(e.get("name"))
+            ] if isinstance(d.get("exercises"), list) else []
+            days.append(d)
+        prog["days"] = days
+    act = st.get("activeSession")
+    if isinstance(act, dict):
+        act = _sanitize_session(act)
+        act.setdefault("dayName", None)
+        act.setdefault("dayId", None)
+        act["isDeload"] = bool(act.get("isDeload"))
+        act.setdefault("note", "")
+        st["activeSession"] = act
+    return st
+
+
 # ---------------------------------------------------------------------------
 # Kalici depolama (JSON dosyasi)
 # ---------------------------------------------------------------------------
-def load_state(path):
-    # DONUS DEGERI: (state, is_new, recovered_from_corruption)
-    #
-    # KOK NEDEN (kod incelemesinde bulundu - "bozuk JSON'a karsi korumasiz"):
-    # ONCEDEN json.load(f) ve state.update(data) burada hicbir try/except
-    # OLMADAN cagriliyordu. Dosya herhangi bir sebeple (disk hatasi, yarida
-    # kesilen bir yazma, kullanicinin dosyayi elle bozmasi, depolama
-    # bozulmasi) gecersiz/bozuk JSON icerirse ya da JSON gecerli ama bir
-    # dict DEGILSE (orn. bos dosya, liste, sayi), uygulama HER ACILISTA
-    # ayni istisnayla cokuyordu - kullanicinin kurtarma yolu yoktu (yedek
-    # olsa bile uygulamaya hic giremedigi icin ice aktaramiyordu).
-    #
-    # DUZELTME: okuma/parse etme HER TURLU hatasini yakaliyoruz. Bozuk
-    # dosyayi SILMIYORUZ (kullanici sonradan elle kurtarmayi deneyebilir) -
-    # yaninda ".corrupt-<unix-zaman>" uzantili bir kopyaya tasiyip
-    # sifirdan bos bir state ile devam ediyoruz. Cagiran taraf (main.py)
-    # recovered_from_corruption=True dondugunde kullaniciya "onceki veri
-    # okunamadi" bilgisini gosterebilsin diye bunu ayri bir bayrakla
-    # bildiriyoruz.
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                raise ValueError(f"beklenen dict, gelen: {type(data).__name__}")
-            state = default_state()
-            state.update(data)
-            if "muscleGroups" not in state or not state["muscleGroups"]:
-                state["muscleGroups"] = data.get("muscleGroups", {})
-            # MERGE edilmis state'i dogruluyoruz (raw data'yi degil) - eski
-            # bir kayit dosyasinda henuz olmayan bir anahtar default_state()
-            # tarafindan zaten dolduruldugu icin bu, eski ama GECERLI
-            # dosyalari reddetmez; sadece MEVCUT alanlardaki tip hatalarini
-            # (liste yerine obje, sayi yerine string vb.) yakalar.
-            validate_state_schema(state)
-            return state, False, False
-        except (OSError, ValueError, TypeError) as e:
+# KOK NEDEN (detayli incelemede bulundu): main.py arka plan thread'inde, ayrica
+# on_pause/on_stop'ta senkron OLARAK, ayni "<dosya>.tmp" yoluna yaziyordu.
+# Yavas bir thread, on_pause'un yazdigi DAHA YENI veriyi eski veriyle
+# ezebilir ya da iki yazim ayni gecici dosyada karisip bozuk JSON uretebilirdi.
+# Ayrica fsync/yedek yoktu: pil/cokme aninda bos dosya kalabilirdi.
+# DUZELTME: TEK kilit altinda yazim, her yazim icin benzersiz gecici dosya,
+# fsync, yazmadan once onceki SAGLAM dosyanin ".bak" kopyasi ve sira numarasi
+# (daha eski bir yukun daha yeniyi ezmesi engellenir).
+_WRITE_LOCK = threading.Lock()
+_SEQ = itertools.count(1)
+_LAST_SEQ = {}
+_SAVE_BLOCKED = set()
+
+
+def next_write_seq():
+    return next(_SEQ)
+
+
+def write_json_atomic(path, payload, seq=None):
+    """payload (hazir JSON metni) dosyaya guvenli yazar. Daha eski bir seq ile
+    gelirse (daha yeni veri zaten yazilmis) yazmaz ve False doner."""
+    d = os.path.dirname(path) or "."
+    os.makedirs(d, exist_ok=True)
+    with _WRITE_LOCK:
+        if path in _SAVE_BLOCKED:
+            raise OSError("kayit engellendi: mevcut dosya okunamadi/tasinamadi, uzerine yazilmiyor")
+        if seq is not None and seq < _LAST_SEQ.get(path, 0):
+            return False
+        tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        if os.path.exists(path):
             try:
-                corrupt_path = f"{path}.corrupt-{int(time.time())}"
-                os.replace(path, corrupt_path)
-            except OSError:
-                corrupt_path = "(tasinamadi)"
-            print(f"[tonaj] UYARI: {path} okunamadi ({e!r}), bozuk kopya "
-                  f"{corrupt_path} olarak birakildi, sifirdan basliyoruz.")
-            state = default_state()
-            state["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
-            save_state(path, state)
-            return state, True, True
-    # KULLANICI ISTEGI: yeni kurulumda ornek/varsayilan 3 gunluk program hic
-    # OLUSTURULMASIN - program bos baslasin, gunleri kullanici kendi ekleyecek.
-    # (Eskiden burada build_seed_program() cagrilip ornek bir program
-    # dolduruluyordu - artik program.days bos ([]) kalıyor, default_state()
-    # zaten boyle donuyor.)
-    state = default_state()
-    state["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
-    save_state(path, state)
-    return state, True, False
+                with open(path, "r", encoding="utf-8") as f:
+                    ok = isinstance(json.load(f), dict)
+                if ok:
+                    shutil.copyfile(path, path + ".bak")
+            except (OSError, ValueError):
+                pass  # mevcut dosya zaten bozuk - .bak'taki iyi kopyayi koru
+        os.replace(tmp, path)
+        if seq is not None:
+            _LAST_SEQ[path] = seq
+    return True
 
 
 def save_state(path, state):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    payload = json.dumps(state, ensure_ascii=False, indent=2)
+    return write_json_atomic(path, payload, next_write_seq())
+
+
+IMPORT_REQUIRED_KEYS = ("history", "program", "library", "activeSession")
+
+
+def prepare_import(data):
+    """Ice aktarilan bir yedegi (zaten json.loads edilmis) kullanima hazirlar:
+    ONCE ham veride zorunlu anahtarlar aranir (yoksa rastgele bir JSON dosyasi
+    secilip mevcut veri silinmesin), SONRA kucuk hatalar onarilir ve yapi
+    dogrulanir. Gecersizse aciklayici ValueError."""
+    if not isinstance(data, dict):
+        raise ValueError(f"beklenen bir obje (dict), gelen: {type(data).__name__}")
+    missing = [k for k in IMPORT_REQUIRED_KEYS if k not in data]
+    if missing:
+        raise ValueError(f"bu bir Tonaj yedeği değil, eksik alan: {', '.join(missing)}")
+    state = sanitize_state(data)
+    validate_state_schema(state)
+    return state
+
+
+def make_safety_copy(path, label, keep=3, state=None):
+    """Geri alinamaz bir islemden (yedekten yukleme, tum veriyi sifirlama) ONCE
+    mevcut verinin kopyasini '<dosya>.<label>-<zaman>.json' olarak saklar;
+    ayni etiketten en yeni `keep` kopya tutulur. `state` verilirse (bellekteki
+    EN GUNCEL veri - diske henuz yazilmamis olabilir) o yazilir, yoksa mevcut
+    dosya kopyalanir. Kopya yolunu ya da basarisizsa None dondurur."""
+    dst = f"{path}.{label}-{int(time.time())}.json"
+    try:
+        if state is not None:
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(dst, "w", encoding="utf-8") as f:
+                json.dump(state, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+        elif os.path.exists(path):
+            shutil.copyfile(path, dst)
+        else:
+            return None
+    except OSError:
+        return None
+    d = os.path.dirname(path) or "."
+    prefix = os.path.basename(path) + "." + label + "-"
+    old = sorted(f for f in os.listdir(d) if f.startswith(prefix))
+    for f in old[:-keep]:
+        try:
+            os.remove(os.path.join(d, f))
+        except OSError:
+            pass
+    return dst
+
+
+def _read_state_file(path):
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    state = sanitize_state(data)
+    validate_state_schema(state)
+    return state
+
+
+def _quarantine(path):
+    """Okunamayan dosyayi silmeden yanina tasir. Tasinamazsa None doner."""
+    corrupt_path = f"{path}.corrupt-{int(time.time())}"
+    try:
+        os.replace(path, corrupt_path)
+        return corrupt_path
+    except OSError:
+        return None
+
+
+def load_state(path):
+    # DONUS DEGERI: (state, is_new, recovered_from_corruption)
+    #
+    # Sira: 1) ana dosya (sanitize_state ile kucuk hatalar ONARILIR), 2) ana
+    # dosya JSON olarak bozuksa ".bak" (bir onceki saglam kayit), 3) ikisi de
+    # olmazsa bozuk dosya ".corrupt-<zaman>" olarak KENARA ALINIR (silinmez) ve
+    # bos state ile devam edilir. Dosya OKUNAMIYORSA (gecici OSError) ya da
+    # kenara tasinamiyorsa uzerine ASLA yazilmaz (kayitlar bloklanir).
+    def fresh():
+        s = default_state()
+        s["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
+        return s
+
+    if os.path.exists(path):
+        try:
+            return _read_state_file(path), False, False
+        except (OSError, ValueError, TypeError) as e:
+            err = e
+        bak = path + ".bak"
+        if os.path.exists(bak):
+            try:
+                state = _read_state_file(bak)
+                if _quarantine(path) is not None or not os.path.exists(path):
+                    save_state(path, state)
+                    print(f"[tonaj] UYARI: {path} okunamadi ({err!r}), .bak'tan geri yuklendi.")
+                    return state, False, True
+            except (OSError, ValueError, TypeError):
+                pass
+        corrupt_path = _quarantine(path)
+        print(f"[tonaj] UYARI: {path} okunamadi ({err!r}), bozuk kopya "
+              f"{corrupt_path} olarak birakildi, sifirdan basliyoruz.")
+        state = fresh()
+        if corrupt_path is None and os.path.exists(path):
+            _SAVE_BLOCKED.add(path)  # orijinal dosyanin uzerine yazma
+            return state, True, True
+        save_state(path, state)
+        return state, True, True
+    # KULLANICI ISTEGI: yeni kurulumda ornek/varsayilan 3 gunluk program hic
+    # OLUSTURULMASIN - program bos baslasin, gunleri kullanici kendi ekleyecek.
+    state = fresh()
+    save_state(path, state)
+    return state, True, False
 
 
 # ---------------------------------------------------------------------------
@@ -696,9 +941,16 @@ def max_weight_for(state, name):
     return best
 
 
+def _history_newest_first(state):
+    """Gecmisi EN YENI -> EN ESKI dondurur; listenin sirasina GUVENMEZ (ice
+    aktarilan/elle duzenlenen yedeklerde sira bozuk olabilir). Esit
+    zamanlarda mevcut sira korunur."""
+    return sorted(state["history"], key=lambda s: s.get("startedAt", 0), reverse=True)
+
+
 def history_for_exercise(state, name):
     pts = []
-    for s in reversed(state["history"]):  # oldest -> newest for the raw scan
+    for s in reversed(_history_newest_first(state)):  # oldest -> newest
         for ex in s["exercises"]:
             if ex["name"] == name:
                 working = [st for st in ex["sets"] if not st.get("isWarmup")]
@@ -711,7 +963,7 @@ def history_for_exercise(state, name):
 def suggested_weight_for(state, name, target_min, target_max):
     """Cift ilerleme: tavana ulastiysa agirlik artir, tabanin altinda kaldiysa
     ayni agirlik, aradaysa ayni agirlik (bu sefer tavana ulasmaya calis)."""
-    for s in state["history"]:  # newest first
+    for s in _history_newest_first(state):
         if s.get("isDeload"):
             continue
         ex = next((e for e in s["exercises"] if e["name"] == name), None)
@@ -721,12 +973,16 @@ def suggested_weight_for(state, name, target_min, target_max):
         if not working:
             continue
         last_weight = max(st["weight"] for st in working)
-        below_floor = target_min is not None and any(st["reps"] < target_min for st in working)
-        at_ceiling = target_max is not None and all(st["reps"] >= target_max for st in working)
+        # Sadece EN AGIR (ust) setlere bakiyoruz: hafif bir geri-cekilme (back-off)
+        # seti tavan tekrara ulasti diye gereksiz agirlik artisi onerilmesin,
+        # ya da hafif bir set tabanin altinda kaldi diye yanlis "below" cikmasin.
+        top = [st for st in working if st["weight"] == last_weight]
+        below_floor = target_min is not None and any(st["reps"] < target_min for st in top)
+        at_ceiling = target_max is not None and all(st["reps"] >= target_max for st in top)
         if below_floor:
             return {"weight": last_weight, "reason": "below"}
         if at_ceiling:
-            inc = increment_for(name)
+            inc = increment_for(name, state)
             if inc > 0:
                 return {"weight": round(last_weight + inc, 2), "reason": "ceiling"}
             return {"weight": last_weight, "reason": "ceiling-bw"}
@@ -735,6 +991,12 @@ def suggested_weight_for(state, name, target_min, target_max):
 
 
 def start_session(state, day_id=None, is_deload=False):
+    # KOK NEDEN (detayli incelemede bulundu): devam eden bir antrenman varken
+    # tekrar cagrilirsa (cift dokunma yarisi vb.) eskisi SESSIZCE silinip girilen
+    # setler kayboluyordu. Artik zaten aktif bir seans varsa o aynen dondurulur
+    # (kullanici kaldigi yerden devam eder).
+    if state.get("activeSession"):
+        return state["activeSession"]
     exercises = []
     day_name = None
     if day_id:
@@ -768,18 +1030,37 @@ def start_session(state, day_id=None, is_deload=False):
     return state["activeSession"]
 
 
+def canonical_exercise_name(state, name):
+    """Yazim farklarini (bosluk, buyuk/kucuk harf) mevcut bir hareketle
+    eslestirir: "squat" -> "Squat". Eslesme yoksa temizlenmis adi dondurur."""
+    name = clean_name(name)
+    names = all_exercise_names(state)
+    if name in names:
+        return name
+    lower = name.lower()
+    return next((n for n in names if n.lower() == lower), name)
+
+
 def add_exercise_to_session(state, name):
+    """Aktif seansa hareket ekler. True: eklendi, False: zaten vardi / seans yok."""
     sess = state["activeSession"]
-    if not sess or any(e["name"] == name for e in sess["exercises"]):
-        return
+    name = canonical_exercise_name(state, name)
+    if not sess or not name or any(e["name"] == name for e in sess["exercises"]):
+        return False
     sess["exercises"].append({"name": name, "sets": []})
+    return True
 
 
 def add_set(state, ex_index, weight, reps, is_warmup=False, rir=None):
     sess = state["activeSession"]
     ex = sess["exercises"][ex_index]
     prev_max = max_weight_for(state, ex["name"])
-    s = {"weight": float(weight), "reps": int(reps)}
+    weight = float(weight)
+    reps = int(reps)
+    # 0 kg gecerli (vucut agirligi hareketleri); negatif agirlik ve 0 tekrar degil.
+    if not (weight >= 0) or weight == float("inf") or reps < 1:
+        raise ValueError("gecersiz set: agirlik >= 0 ve tekrar >= 1 olmali")
+    s = {"weight": weight, "reps": reps}
     if is_warmup:
         s["isWarmup"] = True
     if rir is not None:
@@ -793,15 +1074,23 @@ def remove_set(state, ex_index, set_index):
     state["activeSession"]["exercises"][ex_index]["sets"].pop(set_index)
 
 
+def session_has_working_sets(sess):
+    return any(not st.get("isWarmup")
+               for ex in (sess or {}).get("exercises", []) for st in ex.get("sets", []))
+
+
 def finish_session(state):
+    """Aktif seansi bitirir. True: gecmise kaydedildi; False: kaydedilecek
+    CALISMA seti yoktu (bos / sadece isinma), seans kaydedilmeden kapatildi -
+    boylece gecmise bos kayit dusmez ve "SIRADA" gun sirasi ilerlemez."""
     sess = state["activeSession"]
     if not sess:
-        return
-    if len(sess["exercises"]) == 0:
-        state["activeSession"] = None
-        return
-    state["history"].insert(0, sess)
+        return False
     state["activeSession"] = None
+    if not session_has_working_sets(sess):
+        return False
+    state["history"].insert(0, sess)
+    return True
 
 
 def discard_session(state):
@@ -870,7 +1159,7 @@ def set_day_exercise_target(state, day_id, name, target_sets=None, target_reps_m
     else:
         day["exercises"].append(obj)
     if muscle_groups is not None:
-        state["muscleGroups"][name] = muscle_groups
+        state["muscleGroups"][name] = list(muscle_groups)
     # Aktif bir seansta ayni gunden ayni hareket varsa canli guncelle
     sess = state["activeSession"]
     if sess and sess.get("dayId") == day_id:
@@ -889,11 +1178,18 @@ def rename_exercise(state, old, new):
     sonra uygulama). Reddedilen durumlar: bos/ayni isim, ve yeni isim ayni
     gunde/ayni antrenmanda ZATEN varsa (birlestirmek set verisini karistirir).
     """
-    new = (new or "").strip()
+    new = clean_name(new)
     if not new:
         return False, "Yeni isim boş olamaz."
     if new == old:
         return False, "Yeni isim eskisiyle aynı."
+    # Buyuk/kucuk harf farkiyla mevcut bir harekete denk geliyorsa o adi kullan
+    # ("squat" yazilirsa var olan "Squat" ile birlesir, yeni bir ikiz olusmaz).
+    # old'in kendisi (ör. "squat" -> "Squat" duzeltmesi) haric.
+    lower = new.lower()
+    match = next((n for n in all_exercise_names(state) if n.lower() == lower and n != old), None)
+    if match:
+        new = match
 
     containers = [d["exercises"] for d in state["program"]["days"]]
     containers += [s["exercises"] for s in state["history"]]
@@ -904,10 +1200,21 @@ def rename_exercise(state, old, new):
         if old in names and new in names:
             return False, f'"{new}" adlı hareket aynı günde/antrenmanda zaten var; önce birini kaldır.'
 
+    # Artis kategorisini (izolasyon/vucut agirligi...) yeni ada tasi - yoksa
+    # yeniden adlandirilan hareket "compound" sayilip yanlis artis onerilirdi.
+    cat = increment_category_for(old, state)
     for exs in containers:
         for e in exs:
             if e["name"] == old:
                 e["name"] = new
+    if new not in EXERCISE_INCREMENT:
+        state.setdefault("incrementOverrides", {})[new] = cat
+    # Hazir bir hareketin eski adi secicide kalmasin.
+    hidden = state.setdefault("hiddenDefaults", [])
+    if old in DEFAULT_EXERCISES and old not in hidden:
+        hidden.append(old)
+    if new in hidden:
+        hidden.remove(new)
 
     state["library"] = list(dict.fromkeys(new if n == old else n for n in state["library"]))
     mg = state.get("muscleGroups") or {}
@@ -946,7 +1253,7 @@ def next_suggested_day_id(state):
     days = state["program"]["days"]
     if not days:
         return None
-    for s in state["history"]:
+    for s in _history_newest_first(state):
         if s.get("dayId"):
             idx = next((i for i, d in enumerate(days) if d["id"] == s["dayId"]), -1)
             if idx >= 0:
@@ -955,7 +1262,8 @@ def next_suggested_day_id(state):
 
 
 def all_exercise_names(state):
-    names = set(DEFAULT_EXERCISES) | set(state["library"])
+    hidden = set(state.get("hiddenDefaults") or [])
+    names = (set(DEFAULT_EXERCISES) - hidden) | set(state["library"])
     for s in state["history"]:
         for e in s["exercises"]:
             names.add(e["name"])
@@ -1090,8 +1398,12 @@ def weekly_tonnage_trend(state, weeks=8, now_ms_value=None):
     """
     now = now_ms_value if now_ms_value is not None else now_ms()
     cur_week_start = period_key(now, "week")
-    week_ms = 7 * 24 * 60 * 60 * 1000
-    week_starts = [cur_week_start - i * week_ms for i in range(weeks - 1, -1, -1)]
+    # KOK NEDEN: sabit 7*24 saat cikarmak, yaz/kis saati gecen bolgelerde
+    # (Avrupa vb.) yerel gece yarisini kaydirip hafta anahtarlarinin hic
+    # eslesmemesine yol aciyordu. Yerel tarihten takvim haftasi geri gidiyoruz.
+    cur_dt = datetime.fromtimestamp(cur_week_start / 1000)
+    week_starts = [int((cur_dt - timedelta(weeks=i)).timestamp() * 1000)
+                   for i in range(weeks - 1, -1, -1)]
     totals = {w: 0.0 for w in week_starts}
     for s in state["history"]:
         wk = period_key(s["startedAt"], "week")

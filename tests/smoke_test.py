@@ -689,9 +689,28 @@ def step_start_and_finish_session_normally():
     program_screen.render()
     finish_btn = find_text(program_screen, "ANTRENMANI BİTİR VE KAYDET")
     assert finish_btn is not None, "finish button not found"
+    n_before = len(app.state["history"])
+
+    # Hic calisma seti yokken: onay popup'i cikar, onaylansa bile gecmise bos
+    # kayit DUSMEZ (eskiden "KAYDEDILDI" deyip bos kayit ekliyordu).
     click(finish_btn)
+    popup = top_popup("Antrenmanı Bitir")
+    assert popup is not None, "bos antrenman icin onay popup'i acilmadi"
+    click(find_text(popup, "EVET, KAPAT", exact=False))
     assert app.state["activeSession"] is None
-    assert app.state["history"], "finished session should land in history"
+    assert len(app.state["history"]) == n_before, "bos antrenman gecmise kaydedilmemeli"
+
+    # Gercek bir calisma seti varken: onaysiz dogrudan kaydedilir.
+    program_screen.render()
+    click(find_text(program_screen, "BAŞLA"))
+    core.add_set(app.state, 0, 60, 8) if app.state["activeSession"]["exercises"] else None
+    if not app.state["activeSession"]["exercises"]:
+        core.add_exercise_to_session(app.state, "Squat")
+        core.add_set(app.state, 0, 60, 8)
+    program_screen.render()
+    click(find_text(program_screen, "ANTRENMANI BİTİR VE KAYDET"))
+    assert app.state["activeSession"] is None
+    assert len(app.state["history"]) == n_before + 1, "finished session should land in history"
 
 safe("start and finish a session normally", step_start_and_finish_session_normally)
 
@@ -1356,6 +1375,178 @@ def step_stepper_slide_off_release_stops_repeat():
         f"parmak dugme disinda kaldirilinca deger artmaya devam etti ({settled} -> {stepper.value})")
 
 safe("stepper: parmak dugme disinda birakilinca tekrar durur", step_stepper_slide_off_release_stops_repeat)
+
+
+def _card_steppers(screen):
+    """Aktif antrenman ekranindaki +/- sayaclari (agirlik, tekrar, RIR sirasiyla)."""
+    from kivy.uix.boxlayout import BoxLayout as _BL
+    return [w for w in screen.walk() if isinstance(w, _BL) and hasattr(w, "value")]
+
+
+def _fresh_free_session_with(exercise):
+    app.state["activeSession"] = None
+    program_screen.edit_mode = False
+    core.start_session(app.state)
+    core.add_exercise_to_session(app.state, exercise)
+    go("program")
+    program_screen.render()
+
+
+def step_zero_kg_set_can_be_logged_and_form_remembers_last_values():
+    _fresh_free_session_with("Chin-up")
+    w, r, rir = _card_steppers(program_screen)[:3]
+    w.value, r.value = 0.0, 8
+    click(find_text(program_screen, "+ SETİ EKLE"))
+    sets = app.state["activeSession"]["exercises"][0]["sets"]
+    assert len(sets) == 1 and sets[0]["weight"] == 0.0 and sets[0]["reps"] == 8, "0 kg set kaydedilmedi"
+
+    # Ikinci set: form son girilen degerlerle (0 kg x 8) acilmali
+    w, r, rir = _card_steppers(program_screen)[:3]
+    assert (w.value, r.value) == (0.0, 8), f"form son degerleri hatirlamadi: {w.value}, {r.value}"
+    w.value, r.value = 85.0, 7
+    click(find_text(program_screen, "+ SETİ EKLE"))
+    w, r, rir = _card_steppers(program_screen)[:3]
+    assert (w.value, r.value) == (85.0, 7), "form son girilen degerleri tutmali"
+    app.state["activeSession"] = None
+
+safe("active session: 0 kg set works and form remembers last values",
+     step_zero_kg_set_can_be_logged_and_form_remembers_last_values)
+
+
+def step_set_numbering_skips_warmups():
+    _fresh_free_session_with("Squat")
+    from kivy.uix.togglebutton import ToggleButton as _TB
+    w, r, rir = _card_steppers(program_screen)[:3]
+    tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
+    w.value, r.value = 40.0, 10
+    tb.state = "down"
+    click(find_text(program_screen, "+ SETİ EKLE"))      # isinma
+    w, r, rir = _card_steppers(program_screen)[:3]
+    tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
+    tb.state = "normal"
+    w.value, r.value = 80.0, 5
+    click(find_text(program_screen, "+ SETİ EKLE"))      # 1. calisma seti
+    assert find_text(program_screen, "ISI") is not None
+    assert find_text(program_screen, "1") is not None, "ilk calisma seti '1' olmali"
+    assert find_text(program_screen, "2") is None, "isinma seti numaralandirmaya katilmamali"
+    app.state["activeSession"] = None
+
+safe("active session: working-set numbering ignores warm-ups", step_set_numbering_skips_warmups)
+
+
+def step_hedef_popup_fits_phone_window_and_scrolls():
+    from kivy.uix.scrollview import ScrollView as _SV
+    full = Window.size
+    try:
+        app.state["activeSession"] = None
+        app.state["program"]["days"] = []
+        day = core.add_program_day(app.state)
+        core.set_day_exercise_target(app.state, day["id"], "Squat", target_sets=3)
+        program_screen.edit_mode = True
+        go("program")
+        program_screen.render()
+        Window.size = (360, 640)
+        for _ in range(3):
+            Clock.tick()
+        click(find_text(program_screen, "Squat").parent)
+        Clock.tick()
+        popup = top_popup("Hedef")
+        assert popup is not None
+        for _ in range(3):
+            Clock.tick()
+        assert popup.height <= Window.height * 0.9 + 1, f"popup ekrana sigmiyor: {popup.height}"
+        sv = [w for w in popup.walk() if isinstance(w, _SV)][0]
+        assert sv.height < sv.children[0].height, "govde kaydirilabilir olmali (icerik sigmiyor)"
+        save = find_text(popup, "KAYDET", exact=False)
+        assert save is not None
+        # Kaydet butonu popup govdesinin sinirlari icinde kalmali (kirpilmamali)
+        assert save.top <= popup.top and save.y >= popup.y, "Kaydet butonu popup disina tasti"
+
+        # tekrar min > max reddedilir
+        steppers = [w for w in popup.walk() if hasattr(w, "value") and w.__class__.__name__ == "BoxLayout"]
+        rmin, rmax = steppers[1], steppers[2]
+        rmin.value, rmax.value = 12, 8
+        click(save)
+        assert top_popup("Hedef") is popup, "gecersiz tekrar araligi kabul edildi"
+        popup.dismiss(animation=False)
+    finally:
+        Window.size = full
+        for _ in range(3):
+            Clock.tick()
+        program_screen.edit_mode = False
+
+safe("Hedef popup: fits a phone-height window, body scrolls, rejects min>max",
+     step_hedef_popup_fits_phone_window_and_scrolls)
+
+
+def step_deload_asks_for_confirmation():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Squat", target_sets=3)
+    program_screen.edit_mode = False
+    go("program")
+    program_screen.render()
+    click(find_text(program_screen, "Deload"))
+    popup = top_popup("Deload Antrenmanı")
+    assert popup is not None and app.state["activeSession"] is None, "deload onaysiz basladi"
+    popup.dismiss(animation=False)
+
+safe("deload start asks for confirmation", step_deload_asks_for_confirmation)
+
+
+def step_lb_mode_shows_rounded_weights():
+    app.state["activeSession"] = None
+    app.state["settings"]["weightUnit"] = "lb"
+    try:
+        app.state["program"]["days"] = []
+        day = core.add_program_day(app.state)
+        core.set_day_exercise_target(app.state, day["id"], "Squat", target_sets=3, target_weight=100)
+        core.start_session(app.state, day["id"])
+        go("program")
+        program_screen.render()
+        w = _card_steppers(program_screen)[0]
+        assert w.value == 220.5, f"lb modunda 100kg ~220.462 yerine 220.5 gosterilmeli, bulunan {w.value}"
+    finally:
+        app.state["settings"]["weightUnit"] = "kg"
+        app.state["activeSession"] = None
+
+safe("lb mode: weights shown rounded to 0.5 lb", step_lb_mode_shows_rounded_weights)
+
+
+def step_import_and_reset_keep_safety_copies():
+    import json as _json
+    import glob
+    from screens.settings import SettingsScreen
+    st_screen = sm.get_screen("settings")
+    base = app.state_path()
+    app.state["library"] = ["Mevcut Veri"]
+
+    # bozuk dosya: mevcut veriye DOKUNMAZ
+    st_screen.apply_import(b"{bozuk")
+    assert app.state["library"] == ["Mevcut Veri"]
+    # Tonaj yedegi olmayan JSON: reddedilir
+    st_screen.apply_import(b'{"foo": 1}')
+    assert app.state["library"] == ["Mevcut Veri"]
+    # eksik alanli (eski) ama gecerli yedek: kabul edilir, onarilir, guvenlik kopyasi alinir
+    old = {"history": [], "program": {"days": []}, "library": ["Yedekten"], "activeSession": None}
+    st_screen.apply_import(_json.dumps(old).encode("utf-8"))
+    assert app.state["library"] == ["Yedekten"] and app.state["muscleGroups"]
+    copies = glob.glob(base + ".pre-import-*.json")
+    assert copies, "yedekten yuklemeden once guvenlik kopyasi alinmadi"
+    with open(copies[-1], encoding="utf-8") as f:
+        assert _json.load(f)["library"] == ["Mevcut Veri"]
+
+    # sifirlama: guvenlik kopyasi alinir
+    st_screen.confirm_reset_all()
+    popup = top_popup("Tüm Verileri Sıfırla")
+    assert popup is not None
+    click(find_text(popup, "EVET, SIFIRLA", exact=False))
+    assert app.state["library"] == []
+    assert glob.glob(base + ".pre-reset-*.json"), "sifirlamadan once guvenlik kopyasi alinmadi"
+    assert isinstance(SettingsScreen, type)
+
+safe("settings: import validates + reset/import keep safety copies", step_import_and_reset_keep_safety_copies)
 
 
 print()
