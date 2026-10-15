@@ -7,6 +7,8 @@ canli olarak set islemesine izin veren ekran. Davranis main.py'deki
 halinden HICBIR sekilde degismedi - bu SAF bir tasima (bkz. shared.py
 basindaki Task 18 notu).
 """
+import time
+
 from kivy.app import App
 from kivy.core.window import Window
 from kivy.uix.screenmanager import Screen
@@ -30,7 +32,7 @@ from shared import (
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
     toast, target_label, _find_scrollview, exercise_search_input, note_input,
-    round_display_weight,
+    round_display_weight, fmt_clock, vibrate,
 )
 
 
@@ -695,7 +697,183 @@ class ProgramScreen(Screen):
         col.add_widget(discard)
 
         scroll.add_widget(col)
-        return scroll
+        # Dinlenme sayaci ve "geri al" satiri kaydirma alaninin DISINDA, ustte
+        # sabit: set girerken ekran kaysa bile sayac hep gorunur.
+        wrapper = BoxLayout(orientation="vertical")
+        wrapper.add_widget(self._build_undo_row())
+        wrapper.add_widget(self._build_rest_bar())
+        wrapper.add_widget(scroll)
+        return wrapper
+
+    # ------------------------------------------------------------------
+    # Dinlenme sayaci
+    # ------------------------------------------------------------------
+    # Zaman duvar saatine (time.time) gore hesaplanir, sayac tick sayarak
+    # DEGIL: uygulama arka plana gidip gelse bile kalan sure dogru kalir.
+    def _rest_state(self):
+        if not hasattr(self, "_rest"):
+            self._rest = {"end": None, "done": False, "ev": None}
+        return self._rest
+
+    def rest_mode(self):
+        r = self._rest_state()
+        if r["done"]:
+            return "done"
+        return "running" if r["end"] is not None else "idle"
+
+    def _rest_default(self):
+        app = App.get_running_app()
+        return core.clamp_rest_seconds((app.state.get("settings") or {}).get("restSeconds"))
+
+    def start_rest(self, seconds=None):
+        r = self._rest_state()
+        self.stop_rest(refresh=False)
+        r["end"] = time.time() + (seconds if seconds is not None else self._rest_default())
+        r["done"] = False
+        r["ev"] = Clock.schedule_interval(self._rest_tick, 0.5)
+        self._rest_refresh()
+
+    def stop_rest(self, refresh=True):
+        r = self._rest_state()
+        if r["ev"] is not None:
+            r["ev"].cancel()
+            r["ev"] = None
+        r["end"] = None
+        r["done"] = False
+        if refresh:
+            self._rest_refresh()
+
+    def _rest_tick(self, *_):
+        r = self._rest_state()
+        if r["end"] is None:
+            return False
+        if r["end"] - time.time() <= 0:
+            if r["ev"] is not None:
+                r["ev"].cancel()
+                r["ev"] = None
+            r["end"] = None
+            r["done"] = True
+            vibrate()
+        self._rest_refresh()
+        return None
+
+    def rest_adjust(self, delta):
+        """Calisirken: kalan sureyi, beklerken: varsayilan dinlenmeyi +/- delta."""
+        app = App.get_running_app()
+        r = self._rest_state()
+        if r["end"] is not None:
+            r["end"] = max(time.time() + 1, r["end"] + delta)
+        elif not r["done"]:
+            settings = app.state.setdefault("settings", {})
+            settings["restSeconds"] = core.clamp_rest_seconds(self._rest_default() + delta)
+            app.save()
+        self._rest_refresh()
+
+    def _rest_action(self, *_):
+        mode = self.rest_mode()
+        if mode == "idle":
+            self.start_rest()
+        else:
+            self.stop_rest()
+
+    def _rest_refresh(self):
+        lbl = getattr(self, "_rest_lbl", None)
+        btn = getattr(self, "_rest_btn", None)
+        if lbl is None or btn is None:
+            return
+        mode = self.rest_mode()
+        r = self._rest_state()
+        if mode == "running":
+            left = int(r["end"] - time.time() + 0.999)
+            lbl.text = f"DİNLENME  {fmt_clock(left)}"
+            lbl.color = ACCENT
+            btn.text = "ATLA"
+        elif mode == "done":
+            lbl.text = "SÜRE DOLDU — SIRA SENDE"
+            lbl.color = ACCENT
+            btn.text = "KAPAT"
+        else:
+            lbl.text = f"DİNLENME  {fmt_clock(self._rest_default())}"
+            lbl.color = MUTED
+            btn.text = "BAŞLAT"
+
+    def _build_rest_bar(self):
+        bar = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6),
+                        padding=[dp(12), dp(4), dp(12), dp(4)])
+        bg_rect(bar, RAISED, radius=0)
+        self._rest_lbl = mono_label("", size=15, color=MUTED, height=dp(44))
+        minus = styled_button("−15", color=BORDER, text_color=TEXT,
+                              size_hint_x=None, width=dp(52), height=dp(44))
+        plus = styled_button("+15", color=BORDER, text_color=TEXT,
+                             size_hint_x=None, width=dp(52), height=dp(44))
+        self._rest_btn = styled_button("BAŞLAT", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1),
+                                       size_hint_x=None, width=dp(84), height=dp(44))
+        minus.bind(on_release=lambda *_: self.rest_adjust(-15))
+        plus.bind(on_release=lambda *_: self.rest_adjust(15))
+        self._rest_btn.bind(on_release=self._rest_action)
+        self._rest_minus, self._rest_plus = minus, plus
+        for w in (self._rest_lbl, minus, plus, self._rest_btn):
+            bar.add_widget(w)
+        self._rest_refresh()
+        return bar
+
+    # ------------------------------------------------------------------
+    # Set silmeyi geri alma
+    # ------------------------------------------------------------------
+    UNDO_SECONDS = 8
+
+    def _clear_undo(self):
+        u = getattr(self, "_undo", None)
+        if u and u.get("ev") is not None:
+            u["ev"].cancel()
+        self._undo = None
+        row = getattr(self, "_undo_row", None)
+        if row is not None:
+            self._undo_apply_visibility()
+
+    def _undo_apply_visibility(self):
+        row = self._undo_row
+        shown = getattr(self, "_undo", None) is not None
+        row.height = dp(44) if shown else 0
+        row.opacity = 1 if shown else 0
+        row.disabled = not shown
+
+    def _build_undo_row(self):
+        row = BoxLayout(size_hint_y=None, height=0, spacing=dp(6),
+                        padding=[dp(12), dp(2), dp(12), dp(2)], opacity=0, disabled=True)
+        bg_rect(row, BORDER, radius=0)
+        row.add_widget(mono_label("Set silindi", size=14, color=TEXT, height=dp(40)))
+        btn = styled_button("GERİ AL", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1),
+                            size_hint_x=None, width=dp(96), height=dp(40))
+        btn.bind(on_release=lambda *_: self.undo_remove_set())
+        row.add_widget(btn)
+        self._undo_row = row
+        self._undo_btn = btn
+        self._undo_apply_visibility()
+        return row
+
+    def offer_undo(self, ex_index, ex_name, set_index, removed):
+        self._clear_undo()
+        ev = Clock.schedule_once(lambda *_: self._clear_undo(), self.UNDO_SECONDS)
+        self._undo = {"ex_index": ex_index, "ex_name": ex_name,
+                      "set_index": set_index, "set": removed, "ev": ev}
+        if getattr(self, "_undo_row", None) is not None:
+            self._undo_apply_visibility()
+
+    def undo_remove_set(self):
+        app = App.get_running_app()
+        u = getattr(self, "_undo", None)
+        sess = app.state.get("activeSession")
+        self._clear_undo()
+        if not u or not sess:
+            return
+        exs = sess.get("exercises", [])
+        if u["ex_index"] >= len(exs) or exs[u["ex_index"]]["name"] != u["ex_name"]:
+            toast(app, "Geri alınamadı")
+            return
+        core.restore_set(app.state, u["ex_index"], u["set_index"], u["set"])
+        app.save()
+        self.render(keep_scroll=True)
 
     def finish_session_ui(self):
         """Antrenmani bitirir. Hic CALISMA seti girilmediyse (bos ya da sadece
@@ -704,6 +882,8 @@ class ProgramScreen(Screen):
 
         def do_finish():
             saved = core.finish_session(app.state)
+            self.stop_rest(refresh=False)
+            self._clear_undo()
             app.save()
             toast(app, "ANTRENMAN KAYDEDİLDİ" if saved else "Çalışma seti olmadığı için kaydedilmedi")
             self.render()
@@ -726,6 +906,8 @@ class ProgramScreen(Screen):
 
         def on_confirm():
             core.discard_session(app.state)
+            self.stop_rest(refresh=False)
+            self._clear_undo()
             app.save()
             self.render()
 
@@ -762,6 +944,7 @@ class ProgramScreen(Screen):
 
         def on_confirm():
             sess["exercises"].pop(idx)
+            self._clear_undo()
             app.save()
             self.render(keep_scroll=True)
 
@@ -797,6 +980,49 @@ class ProgramScreen(Screen):
         # girmek zorunda kalmasin.
         last = {"w": None, "r": None, "rir": None}
 
+        def open_edit(si):
+            """Girilmis bir setin agirlik/tekrar/RIR degerini duzeltme penceresi."""
+            if si >= len(ex["sets"]):
+                return
+            st = ex["sets"][si]
+            w0 = round_display_weight(to_display_weight(st["weight"]))
+            r0 = st["reps"]
+            content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(12), size_hint_y=None)
+            content.bind(minimum_height=content.setter("height"))
+            w_max = 500 if weight_unit() == "kg" else 1100
+            ew = make_stepper(f"Ağırlık ({weight_unit()})", w0,
+                              step=2.5 if weight_unit() == "kg" else 5, decimals=True, max_val=w_max)
+            er = make_stepper("Tekrar", r0, step=1)
+            erir = make_stepper("RIR", st.get("rir"), step=1, max_val=10)
+            for wdg in (ew, er, erir):
+                content.add_widget(wdg)
+            save_btn = styled_button("Kaydet", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1))
+            content.add_widget(save_btn)
+            popup = Popup(title="Seti Düzenle", content=content, size_hint=(0.9, None))
+            fit_popup_to_content(popup, content)
+
+            def do_save(*_a):
+                w, r = ew.value, er.value
+                if w is None or not r:
+                    toast(app, "Geçerli değer gir")
+                    return
+                # Agirlik DEGISMEDIYSE depodaki kesin kg degeri korunur (lb
+                # yuvarlamasi kayitli veriyi sessizce oynatmasin).
+                new_w = st["weight"] if w == w0 else to_storage_kg(w)
+                rir = int(erir.value) if erir.value is not None else None
+                try:
+                    core.update_set(state, idx, si, new_w, int(r), rir)
+                except ValueError:
+                    toast(app, "Geçerli değer gir")
+                    return
+                popup.dismiss(animation=False)
+                app.save()
+                rebuild()
+                self.refresh_tonnage()
+
+            save_btn.bind(on_release=do_save)
+            popup.open(animation=False)
+
         def rebuild(*_):
             card.clear_widgets()
             working = [s for s in ex["sets"] if not s.get("isWarmup")]
@@ -810,7 +1036,12 @@ class ProgramScreen(Screen):
             rm_ex.bind(on_release=lambda *_: self.confirm_remove_exercise(sess, idx, ex["name"]))
             head.add_widget(rm_ex)
             card.add_widget(head)
-            meta = f"{len(working)} SET" + (f" · ÖNCEKİ REKOR {fmt_weight(prev_max).upper()}" if prev_max else "")
+            tsets = ex.get("targetSets")
+            if tsets:
+                meta = f"{len(working)}/{tsets} SET" + (" · TAMAM" if len(working) >= tsets else "")
+            else:
+                meta = f"{len(working)} SET"
+            meta += (f" · ÖNCEKİ REKOR {fmt_weight(prev_max).upper()}" if prev_max else "")
             card.add_widget(mono_label(meta, size=14, color=MUTED, height=dp(20)))
 
             tgt = target_label(ex)
@@ -849,18 +1080,24 @@ class ProgramScreen(Screen):
                     work_no += 1
                 flag = "ISI" if s.get("isWarmup") else str(work_no)
                 row.add_widget(mono_label(f"{flag}", size=14, color=MUTED, width=dp(28)))
-                row.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
+                # Satirin sol kismi (agirlik x tekrar + RIR rozeti) dokunulabilir:
+                # dokununca set duzenleme penceresi acilir.
+                tap = ClickableRow(size_hint_x=1, spacing=dp(6))
+                tap.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
                                            color=FAINT if s.get("isWarmup") else TEXT))
                 badge = core.rir_badge_info(s, ex)
                 if badge:
                     badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
-                    row.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
+                    tap.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
+                tap.bind(on_release=lambda *_a, j=si: open_edit(j))
+                row.add_widget(tap)
                 rm = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(17))
                 def do_remove(*_a, j=si):
-                    core.remove_set(state, idx, j)
+                    removed = core.remove_set(state, idx, j)
                     app.save()
                     rebuild()
                     self.refresh_tonnage()
+                    self.offer_undo(idx, ex["name"], j, removed)
                 rm.bind(on_release=do_remove)
                 row.add_widget(rm)
                 card.add_widget(row)
@@ -919,6 +1156,8 @@ class ProgramScreen(Screen):
                 app.save()
                 if is_pr:
                     toast(app, "YENİ REKOR — PR!")
+                if not is_warm:
+                    self.start_rest()
                 rebuild()
                 self.refresh_tonnage()
 

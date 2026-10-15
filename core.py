@@ -541,7 +541,8 @@ def default_state():
         "incrementOverrides": {},
         "hiddenDefaults": [],
         "bodyweightLog": [],
-        "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0},
+        "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0,
+                     "restSeconds": DEFAULT_REST_SECONDS},
     }
 
 
@@ -711,6 +712,7 @@ def sanitize_state(data):
     settings["fontScale"] = fs if (fs is not None and 0.5 <= fs <= 2.0) else 1.0
     if settings.get("weightUnit") not in ("kg", "lb"):
         settings["weightUnit"] = "kg"
+    settings["restSeconds"] = clamp_rest_seconds(settings.get("restSeconds"))
     st["settings"] = settings
 
     if not isinstance(st.get("muscleGroups"), dict) or not st["muscleGroups"]:
@@ -930,6 +932,39 @@ def session_tonnage(session):
     return total
 
 
+DEFAULT_REST_SECONDS = 90
+MIN_REST_SECONDS = 15
+MAX_REST_SECONDS = 600
+
+
+def clamp_rest_seconds(v):
+    """Dinlenme suresini 15-600 sn araligina sabitler; gecersizse varsayilan (90)."""
+    n = _num(v)
+    if n is None:
+        return DEFAULT_REST_SECONDS
+    return int(min(MAX_REST_SECONDS, max(MIN_REST_SECONDS, round(n))))
+
+
+def estimated_1rm(weight, reps):
+    """Epley tahmini 1TM. 1 tekrar = agirligin kendisi; tekrar 12'de sinirlanir
+    (cok yuksek tekrarlarda tahmin guvenilmez). 0 kg / gecersiz -> 0."""
+    if not weight or weight <= 0 or not reps or reps < 1:
+        return 0.0
+    reps = min(int(reps), 12)
+    return float(weight) if reps == 1 else float(weight) * (1 + reps / 30.0)
+
+
+def best_e1rm_for(state, name):
+    best = 0.0
+    for s in state["history"]:
+        for ex in s["exercises"]:
+            if ex["name"] == name:
+                for st in ex["sets"]:
+                    if not st.get("isWarmup"):
+                        best = max(best, estimated_1rm(st["weight"], st["reps"]))
+    return best
+
+
 def max_weight_for(state, name):
     best = 0.0
     for s in state["history"]:
@@ -1055,6 +1090,13 @@ def add_set(state, ex_index, weight, reps, is_warmup=False, rir=None):
     sess = state["activeSession"]
     ex = sess["exercises"][ex_index]
     prev_max = max_weight_for(state, ex["name"])
+    prev_e1rm = best_e1rm_for(state, ex["name"])
+    # Ayni antrenmanda daha once girilen calisma setleri de "onceki rekor"un
+    # parcasi: ayni agirligi ikinci kez girince yeniden PR denmesin.
+    for earlier in ex["sets"]:
+        if not earlier.get("isWarmup"):
+            prev_max = max(prev_max, earlier["weight"])
+            prev_e1rm = max(prev_e1rm, estimated_1rm(earlier["weight"], earlier["reps"]))
     weight = float(weight)
     reps = int(reps)
     # 0 kg gecerli (vucut agirligi hareketleri); negatif agirlik ve 0 tekrar degil.
@@ -1066,12 +1108,40 @@ def add_set(state, ex_index, weight, reps, is_warmup=False, rir=None):
     if rir is not None:
         s["rir"] = int(rir)
     ex["sets"].append(s)
-    is_pr = (not is_warmup) and s["weight"] > prev_max > 0
+    # PR = hareketin daha once gecmiste kaydi varsa VE (agirlik rekoru YA DA
+    # tahmini 1TM rekoru). Ilk kez yapilan harekette PR denmez.
+    is_pr = False
+    if not is_warmup and prev_max > 0:
+        is_pr = (s["weight"] > prev_max
+                 or estimated_1rm(s["weight"], s["reps"]) > prev_e1rm + 1e-9)
     return is_pr
 
 
 def remove_set(state, ex_index, set_index):
-    state["activeSession"]["exercises"][ex_index]["sets"].pop(set_index)
+    """Seti siler ve silinen seti dondurur (geri alma icin)."""
+    return state["activeSession"]["exercises"][ex_index]["sets"].pop(set_index)
+
+
+def restore_set(state, ex_index, set_index, removed):
+    """remove_set()'in geri alinmasi: seti eski yerine koyar."""
+    sets = state["activeSession"]["exercises"][ex_index]["sets"]
+    sets.insert(max(0, min(set_index, len(sets))), removed)
+
+
+def update_set(state, ex_index, set_index, weight, reps, rir=None):
+    """Mevcut setin agirlik/tekrar/RIR degerlerini degistirir (isinma isareti
+    korunur). Gecersiz degerde ValueError, set degismez."""
+    s = state["activeSession"]["exercises"][ex_index]["sets"][set_index]
+    weight = float(weight)
+    reps = int(reps)
+    if not (weight >= 0) or weight == float("inf") or reps < 1:
+        raise ValueError("gecersiz set: agirlik >= 0 ve tekrar >= 1 olmali")
+    s["weight"] = weight
+    s["reps"] = reps
+    if rir is None:
+        s.pop("rir", None)
+    else:
+        s["rir"] = int(rir)
 
 
 def session_has_working_sets(sess):

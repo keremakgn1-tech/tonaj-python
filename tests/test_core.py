@@ -246,18 +246,89 @@ def test_add_set_below_previous_max_is_not_pr():
     assert is_pr is False
 
 
-def test_add_set_pr_check_only_looks_at_history_not_current_session():
-    # NOT (davranis notu, hata degil): max_weight_for() SADECE state["history"]
-    # taramasi yapar - aktif seansta bu ANDA eklenmis setler prev_max'a dahil
-    # DEGILDIR. Yani ayni agirlikla ust uste iki set girilirse HER IKISI de
-    # (tarihsel rekore gore) PR sayilir - UI tarafinda bu bilincli bir
-    # tasarim (her set kendi basina degerlendirilir).
+def test_add_set_same_weight_twice_in_session_is_pr_only_once():
+    # Ayni antrenmanda daha once girilen calisma setleri "onceki rekor"un
+    # parcasi: ikinci ayni set yeni rekor DEGIL.
     state = core.default_state()
     state["history"] = [make_history_session("Deadlift", [make_set(140, 3)])]
     core.start_session(state)
     core.add_exercise_to_session(state, "Deadlift")
     assert core.add_set(state, 0, weight=150, reps=3) is True
-    assert core.add_set(state, 0, weight=150, reps=3) is True
+    assert core.add_set(state, 0, weight=150, reps=3) is False
+    assert core.add_set(state, 0, weight=152.5, reps=3) is True
+
+
+def test_estimated_1rm_epley_and_edge_cases():
+    assert core.estimated_1rm(100, 1) == 100
+    assert abs(core.estimated_1rm(100, 5) - 100 * (1 + 5 / 30)) < 1e-9
+    assert core.estimated_1rm(0, 5) == 0.0
+    assert core.estimated_1rm(100, 0) == 0.0
+    assert core.estimated_1rm(100, 40) == core.estimated_1rm(100, 12)
+
+
+def test_add_set_e1rm_pr_with_lower_weight_more_reps():
+    state = core.default_state()
+    state["history"] = [make_history_session("Bench", [make_set(100, 5)])]
+    core.start_session(state)
+    core.add_exercise_to_session(state, "Bench")
+    # 95 x 8 -> 95*(1+8/30)=120.3 > 100*(1+5/30)=116.7 : agirlik PR degil, 1TM PR
+    assert core.add_set(state, 0, weight=95, reps=8) is True
+    # 100 x 3 -> 110 < 120.3 ve agirlik rekoru degil
+    assert core.add_set(state, 0, weight=100, reps=3) is False
+
+
+def test_add_set_first_time_exercise_is_never_pr():
+    state = core.default_state()
+    core.start_session(state)
+    core.add_exercise_to_session(state, "Squat")
+    assert core.add_set(state, 0, weight=100, reps=5) is False
+
+
+def test_remove_set_returns_set_and_restore_puts_it_back():
+    state = core.default_state()
+    core.start_session(state)
+    core.add_exercise_to_session(state, "Squat")
+    core.add_set(state, 0, 100, 5)
+    core.add_set(state, 0, 110, 4, rir=2)
+    core.add_set(state, 0, 120, 3)
+    removed = core.remove_set(state, 0, 1)
+    assert removed["weight"] == 110 and removed["rir"] == 2
+    assert [x["weight"] for x in state["activeSession"]["exercises"][0]["sets"]] == [100, 120]
+    core.restore_set(state, 0, 1, removed)
+    assert [x["weight"] for x in state["activeSession"]["exercises"][0]["sets"]] == [100, 110, 120]
+    core.restore_set(state, 0, 99, {"weight": 1.0, "reps": 1})  # tasan indeks sona eklenir
+    assert state["activeSession"]["exercises"][0]["sets"][-1]["weight"] == 1.0
+
+
+def test_update_set_changes_values_keeps_warmup_and_validates():
+    state = core.default_state()
+    core.start_session(state)
+    core.add_exercise_to_session(state, "Squat")
+    core.add_set(state, 0, 60, 8, is_warmup=True, rir=3)
+    core.update_set(state, 0, 0, 65, 6, rir=None)
+    st = state["activeSession"]["exercises"][0]["sets"][0]
+    assert st["weight"] == 65 and st["reps"] == 6 and st["isWarmup"] is True and "rir" not in st
+    core.update_set(state, 0, 0, 0, 10, rir=1)  # 0 kg gecerli
+    assert st["weight"] == 0 and st["rir"] == 1
+    for bad in [(-1, 5), (50, 0), (float("inf"), 5)]:
+        try:
+            core.update_set(state, 0, 0, *bad)
+            assert False, "ValueError bekleniyordu"
+        except ValueError:
+            pass
+    assert st["weight"] == 0 and st["reps"] == 10  # gecersiz girdi seti degistirmedi
+
+
+def test_rest_seconds_clamped_and_repaired():
+    assert core.clamp_rest_seconds(None) == 90
+    assert core.clamp_rest_seconds("abc") == 90
+    assert core.clamp_rest_seconds(5) == 15
+    assert core.clamp_rest_seconds(99999) == 600
+    assert core.clamp_rest_seconds(120) == 120
+    st = core.sanitize_state({"settings": {"restSeconds": -3}})
+    assert st["settings"]["restSeconds"] == 15
+    assert core.default_state()["settings"]["restSeconds"] == 90
+    assert core.sanitize_state({})["settings"]["restSeconds"] == 90
 
 
 def test_add_set_warmup_never_counts_as_pr():

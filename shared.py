@@ -812,6 +812,25 @@ def toast(app, msg):
     app.root_widget.show_toast(msg)
 
 
+def fmt_clock(seconds):
+    """Saniyeyi 'd:ss' (ornek 90 -> '1:30') bicimine cevirir; negatif -> 0:00."""
+    seconds = max(0, int(seconds))
+    return f"{seconds // 60}:{seconds % 60:02d}"
+
+
+def vibrate(ms=400):
+    """Android'de kisa titresim (dinlenme bitti uyarisi). Masaustunde / izin
+    ya da API yoksa SESSIZCE hicbir sey yapmaz - uyari ek bir ozellik, asla
+    hata kaynagi olmamali."""
+    try:
+        from jnius import autoclass
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        ctx = autoclass("android.content.Context")
+        activity.getSystemService(ctx.VIBRATOR_SERVICE).vibrate(int(ms))
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Yardimci: hedef metni
 # ---------------------------------------------------------------------------

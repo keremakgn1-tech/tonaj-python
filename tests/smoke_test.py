@@ -1549,6 +1549,174 @@ def step_import_and_reset_keep_safety_copies():
 safe("settings: import validates + reset/import keep safety copies", step_import_and_reset_keep_safety_copies)
 
 
+def _x_buttons(screen):
+    from kivy.uix.button import Button as _B
+    return [b for b in screen.walk() if isinstance(b, _B) and b.text == "×"]
+
+
+def step_rest_timer_starts_after_working_set_and_can_be_controlled():
+    from kivy.uix.togglebutton import ToggleButton as _TB
+    program_screen.stop_rest(refresh=False)
+    app.state["settings"]["restSeconds"] = 90
+    _fresh_free_session_with("Squat")
+    assert program_screen.rest_mode() == "idle"
+    assert find_text(program_screen, "DİNLENME  1:30", exact=False) is not None, "bosta varsayilan sure gorunmeli"
+
+    # isinma seti sayaci BASLATMAZ
+    w, r, rir = _card_steppers(program_screen)[:3]
+    tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
+    w.value, r.value = 40.0, 10
+    tb.state = "down"
+    click(find_text(program_screen, "+ SETİ EKLE"))
+    assert program_screen.rest_mode() == "idle", "isinma seti dinlenme sayacini baslatmamali"
+
+    # calisma seti baslatir
+    w, r, rir = _card_steppers(program_screen)[:3]
+    tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
+    tb.state = "normal"
+    w.value, r.value = 80.0, 5
+    click(find_text(program_screen, "+ SETİ EKLE"))
+    assert program_screen.rest_mode() == "running", "calisma seti sonrasi sayac baslamali"
+    left = program_screen._rest["end"] - time.time()
+    assert 88 <= left <= 91, f"kalan sure ~90 olmali: {left}"
+    assert find_text(program_screen, "ATLA") is not None
+
+    # calisirken +15 kalan sureyi uzatir, ayari degistirmez
+    before = program_screen._rest["end"]
+    program_screen.rest_adjust(15)
+    assert abs((program_screen._rest["end"] - before) - 15) < 0.01
+    assert app.state["settings"]["restSeconds"] == 90
+
+    # sure dolunca "done"
+    program_screen._rest["end"] = time.time() - 1
+    program_screen._rest_tick()
+    assert program_screen.rest_mode() == "done"
+    assert find_text(program_screen, "SÜRE DOLDU", exact=False) is not None
+    click(find_text(program_screen, "KAPAT"))
+    assert program_screen.rest_mode() == "idle"
+
+    # beklerken +/-15 varsayilani degistirir ve kaydeder, 15-600 araliginda kalir
+    program_screen.rest_adjust(15)
+    assert app.state["settings"]["restSeconds"] == 105
+    for _ in range(100):
+        program_screen.rest_adjust(-15)
+    assert app.state["settings"]["restSeconds"] == 15
+    app.state["settings"]["restSeconds"] = 90
+
+    # elle baslat / ATLA
+    click(find_text(program_screen, "BAŞLAT"))
+    assert program_screen.rest_mode() == "running"
+    click(find_text(program_screen, "ATLA"))
+    assert program_screen.rest_mode() == "idle"
+    assert program_screen._rest["ev"] is None, "zamanlayici sizdi"
+
+    # antrenman bitince sayac durur
+    program_screen.start_rest()
+    program_screen.finish_session_ui()
+    assert program_screen.rest_mode() == "idle" and program_screen._rest["ev"] is None
+    app.state["activeSession"] = None
+
+safe("rest timer: starts after working set, adjustable, skippable, stops on finish",
+     step_rest_timer_starts_after_working_set_and_can_be_controlled)
+
+
+def step_removed_set_can_be_undone():
+    _fresh_free_session_with("Squat")
+    for wt, rp in ((60.0, 8), (80.0, 5), (100.0, 3)):
+        w, r, rir = _card_steppers(program_screen)[:3]
+        w.value, r.value = wt, rp
+        click(find_text(program_screen, "+ SETİ EKLE"))
+    sets = lambda: [x["weight"] for x in app.state["activeSession"]["exercises"][0]["sets"]]
+    assert sets() == [60.0, 80.0, 100.0]
+    assert program_screen._undo_row.height == 0, "geri al satiri basta gizli olmali"
+
+    # ortadaki seti sil (ilk '×' hareketin kendisi, sonrakiler setler)
+    program_screen.stop_rest()
+    _x_buttons(program_screen)[::-1][1].dispatch("on_release")   # ekranda 2. set (80)
+    assert sets() == [60.0, 100.0], sets()
+    assert program_screen._undo_row.height > 0, "silince geri al satiri gorunmeli"
+    click(find_text(program_screen, "GERİ AL"))
+    assert sets() == [60.0, 80.0, 100.0], f"geri alma seti yerine koymadi: {sets()}"
+    assert program_screen._undo_row.height == 0
+
+    # hareket cikarilinca bekleyen geri alma gecersiz olur
+    _x_buttons(program_screen)[::-1][0].dispatch("on_release")
+    assert program_screen._undo is not None
+    program_screen._undo["ex_index"] = 5
+    program_screen.undo_remove_set()
+    assert sets() == [60.0, 80.0], "gecersiz geri alma seti geri koymamali"
+    app.state["activeSession"] = None
+
+safe("active session: removed set can be undone", step_removed_set_can_be_undone)
+
+
+def step_set_can_be_edited_by_tapping():
+    _fresh_free_session_with("Squat")
+    w, r, rir = _card_steppers(program_screen)[:3]
+    w.value, r.value = 80.0, 5
+    click(find_text(program_screen, "+ SETİ EKLE"))
+    lbl = find_text(program_screen, "80kg × 5")
+    assert lbl is not None
+    row = lbl
+    while row is not None and type(row).__name__ != "ClickableRow":
+        row = row.parent
+    assert row is not None, "set satiri dokunulabilir degil"
+    row.dispatch("on_release")
+    popup = top_popup("Seti Düzenle")
+    assert popup is not None, "set duzenleme penceresi acilmadi"
+    from kivy.uix.boxlayout import BoxLayout as _BL
+    ew, er, erir = [x for x in popup.walk() if isinstance(x, _BL) and hasattr(x, "value")][:3]
+    assert (ew.value, er.value) == (80.0, 5)
+    ew.value, er.value, erir.value = 82.5, 4, 2
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    st = app.state["activeSession"]["exercises"][0]["sets"][0]
+    assert (st["weight"], st["reps"], st["rir"]) == (82.5, 4, 2), st
+    assert find_text(program_screen, "82.5kg × 4") is not None, "kart yenilenmedi"
+    assert top_popup("Seti Düzenle") is None, "kaydedince pencere kapanmali"
+
+    # degistirmeden kaydetmek kesin kg degerini bozmaz (lb yuvarlamasi)
+    app.state["activeSession"]["exercises"][0]["sets"][0]["weight"] = 100.0
+    app.state["settings"]["weightUnit"] = "lb"
+    try:
+        program_screen.render()
+        lbl = find_text(program_screen, "220.462lb × 4") or find_text(program_screen, "lb × 4", exact=False)
+        row = lbl
+        while row is not None and type(row).__name__ != "ClickableRow":
+            row = row.parent
+        row.dispatch("on_release")
+        popup = top_popup("Seti Düzenle")
+        click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+        assert app.state["activeSession"]["exercises"][0]["sets"][0]["weight"] == 100.0
+    finally:
+        app.state["settings"]["weightUnit"] = "kg"
+        app.state["activeSession"] = None
+
+safe("active session: tapping a set edits it (and keeps exact kg when unchanged)",
+     step_set_can_be_edited_by_tapping)
+
+
+def step_progress_badge_shows_done_over_target():
+    app.state["program"]["days"] = []
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Squat", target_sets=2, target_weight=100)
+    core.start_session(app.state, day["id"])
+    go("program")
+    program_screen.render()
+    assert find_text(program_screen, "0/2 SET", exact=False) is not None
+    for _ in range(2):
+        w, r, rir = _card_steppers(program_screen)[:3]
+        w.value, r.value = 100.0, 5
+        click(find_text(program_screen, "+ SETİ EKLE"))
+        if _ == 0:
+            assert find_text(program_screen, "1/2 SET", exact=False) is not None
+            assert find_text(program_screen, "TAMAM", exact=False) is None
+    assert find_text(program_screen, "2/2 SET · TAMAM", exact=False) is not None
+    program_screen.stop_rest(refresh=False)
+    app.state["activeSession"] = None
+
+safe("active session: progress badge shows done/target", step_progress_badge_shows_done_over_target)
+
+
 print()
 print("=" * 60)
 if errors:

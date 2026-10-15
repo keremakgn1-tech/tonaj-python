@@ -61,7 +61,7 @@ android.apptheme = @android:style/Theme.Black.NoTitleBar
 # hic yikmadan sadece gorsel olarak kaydiriyor - detay icin hook.py'a bak.)
 p4a.hook = %(source.dir)s/hook.py
 
-android.permissions = INTERNET
+android.permissions = INTERNET, VIBRATE
 android.api = 34
 android.minapi = 24
 android.ndk_api = 24
