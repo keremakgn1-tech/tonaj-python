@@ -451,38 +451,45 @@ def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
         box.value = new
         refresh()
 
-    def make_hold(delta):
-        # KOK NEDEN: Android'de bazi dokunuşlarda on_press iki kez, arada
-        # on_release gelmeden art arda tetiklenebiliyor (dokunma/focus
-        # glitch'i). Eskiden start() her cagrildiginda ev[0]'i kosulsuz
-        # üzerine yaziyordu; ikinci on_press, ilk cagrida baslatilan
-        # Clock.schedule_interval'in referansini kaybettiriyordu. O ilk
-        # interval hicbir zaman cancel edilemedigi icin sonsuza kadar
-        # calismaya devam ediyor, deger parmak cekildikten sonra bile
-        # durmadan artiyordu ("takildi" hatasi, video ile bildirildi).
-        # DUZELTME: start() artik idempotent - zaten calisan bir interval
-        # varsa ikinci on_press hicbir sey yapmiyor (no-op), boylece asla
-        # ikinci bir interval planlanip ilkinin referansi kaybolmuyor.
+    def make_hold(delta, btn):
+        # KOK NEDEN 1 (video ile bildirilen "takildi" hatasi): Android'de bazi
+        # dokunuslar on_press'i arada on_release olmadan iki kez tetikleyebiliyor;
+        # eskiden her start() ev[0]'in ustune yaziyor, ilk interval iptal
+        # edilemez hale gelip sonsuza kadar calisiyordu. start() artik
+        # idempotent (zaten calisan interval varsa no-op).
+        # KOK NEDEN 2 (detayli incelemede bulundu): Kivy ButtonBehavior,
+        # parmak dugmenin DISINDA kaldirilirsa on_release'i HIC tetiklemiyor
+        # (sadece butonun gorunur durumunu sifirliyor). Yani basili tutup
+        # parmagi kaydirarak birakinca stop() hic cagrilmiyor, deger durmadan
+        # artiyordu. DUZELTME: her tick'te dugme hala basili mi (state=="down")
+        # diye bakiliyor; degilse interval iptal ediliyor. Ek emniyet olarak bir
+        # basili tutma en fazla ~18 sn (150 tick) surebilir.
         ev = [None]
-
-        def _tick(*_):
-            apply_delta(delta)
-
-        def start(*_):
-            if ev[0] is not None:
-                return
-            apply_delta(delta)
-            ev[0] = Clock.schedule_interval(_tick, 0.12)
+        ticks = [0]
 
         def stop(*_):
             if ev[0] is not None:
                 ev[0].cancel()
                 ev[0] = None
 
+        def _tick(*_):
+            ticks[0] += 1
+            if btn.state != "down" or ticks[0] > 150:
+                stop()
+                return
+            apply_delta(delta)
+
+        def start(*_):
+            if ev[0] is not None:
+                return
+            ticks[0] = 0
+            apply_delta(delta)
+            ev[0] = Clock.schedule_interval(_tick, 0.12)
+
         return start, stop
 
-    m_start, m_stop = make_hold(-step)
-    p_start, p_stop = make_hold(step)
+    m_start, m_stop = make_hold(-step, minus)
+    p_start, p_stop = make_hold(step, plus)
     minus.bind(on_press=m_start, on_release=m_stop)
     plus.bind(on_press=p_start, on_release=p_stop)
 

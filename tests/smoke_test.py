@@ -1336,6 +1336,28 @@ def step_library_rename_exercise_keeps_history():
 safe("library: rename exercise keeps history", step_library_rename_exercise_keeps_history)
 
 
+def step_stepper_slide_off_release_stops_repeat():
+    # Kivy ButtonBehavior, parmak dugmenin DISINDA kaldirilirsa on_release
+    # tetiklemez, sadece state'i "normal"e dondurur (_do_release). Eskiden
+    # bu durumda tekrar zamanlayicisi sonsuza kadar calisiyordu.
+    from shared import make_stepper
+    stepper = make_stepper("Test", 10, step=2.5, decimals=True, max_val=500)
+    plus = stepper.children[0].children[0]
+    plus.dispatch("on_press")
+    plus.state = "down"
+    for _ in range(3):
+        Clock.tick(); time.sleep(0.13)
+    plus.state = "normal"  # parmak disarida kaldirildi: on_release YOK
+    Clock.tick(); time.sleep(0.13); Clock.tick()
+    settled = stepper.value
+    for _ in range(10):
+        Clock.tick(); time.sleep(0.13)
+    assert stepper.value == settled, (
+        f"parmak dugme disinda kaldirilinca deger artmaya devam etti ({settled} -> {stepper.value})")
+
+safe("stepper: parmak dugme disinda birakilinca tekrar durur", step_stepper_slide_off_release_stops_repeat)
+
+
 print()
 print("=" * 60)
 if errors:
