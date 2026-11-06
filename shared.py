@@ -812,6 +812,51 @@ def toast(app, msg):
     app.root_widget.show_toast(msg)
 
 
+def increment_step_options():
+    """Artis adimi secenekleri: [(etiket, kg degeri ya da None=varsayilan)].
+    kg modunda 1.25/2.5/5/10 kg, lb modunda 2.5/5/10/20 lb (depoya kg yazilir)."""
+    opts = [("Varsayılan", None)]
+    if weight_unit() == "lb":
+        for lb in (2.5, 5, 10, 20):
+            opts.append((f"{lb:g} lb", round(lb * KG_PER_LB, 4)))
+    else:
+        for kg in (1.25, 2.5, 5, 10):
+            opts.append((f"{kg:g} kg", float(kg)))
+    return opts
+
+
+def make_increment_chooser(state, name):
+    """Hareketin agirlik artis adimini (makineye gore) secen buton satiri.
+    Donen widget'in .value ozelligi secili kg degeri (None = varsayilan);
+    kaydetme isini cagiran yapar (core.set_increment_step)."""
+    current = (state.get("incrementSteps") or {}).get(name)
+    box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(16) + dp(40) + dp(3), spacing=dp(3))
+    box.value = current if current else None
+    box.add_widget(label("Artış adımı (makineye göre)", size=12, color=MUTED, height=dp(16)))
+    row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
+    buttons = []
+
+    def paint():
+        for b, v in buttons:
+            sel = (v is None and box.value is None) or (
+                v is not None and box.value is not None and abs(v - box.value) < 0.01)
+            b.background_color = ACCENT if sel else RAISED
+            b.color = ACCENT_DARK if sel else TEXT
+
+    def pick(v):
+        box.value = v
+        paint()
+
+    for text, v in increment_step_options():
+        b = styled_button(text, color=RAISED, text_color=TEXT, height=dp(40), font_size=sp_(12))
+        b.bind(on_release=lambda *_a, v=v: pick(v))
+        buttons.append((b, v))
+        row.add_widget(b)
+    box.add_widget(row)
+    paint()
+    return box
+
+
 def fmt_clock(seconds):
     """Saniyeyi 'd:ss' (ornek 90 -> '1:30') bicimine cevirir; negatif -> 0:00."""
     seconds = max(0, int(seconds))
@@ -847,8 +892,6 @@ def target_label(ex):
         parts.append(f"{reps} tekrar")
     if ex.get("targetWeight"):
         parts.append(fmt_weight(ex["targetWeight"]))
-    if ex.get("targetRIR") is not None:
-        parts.append(f"RIR {ex['targetRIR']}")
     return " · ".join(parts)
 
 

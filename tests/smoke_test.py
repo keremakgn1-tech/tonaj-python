@@ -548,8 +548,9 @@ def step_use_steppers_in_target_editor_and_save():
     assert popup is not None, "Hedef popup not found"
     plus_buttons = find_all_text(popup, "+")
     minus_buttons = [w for w in popup.walk() if hasattr(w, "text") and w.text in ("−", "-")]
-    assert len(plus_buttons) == 6, f"expected 6 plus buttons, got {len(plus_buttons)}"
-    assert len(minus_buttons) == 6, f"expected 6 minus buttons, got {len(minus_buttons)}"
+    # Set, tekrar min, tekrar max, agirlik, dinlenme (RIR kaldirildi)
+    assert len(plus_buttons) == 5, f"expected 5 plus buttons, got {len(plus_buttons)}"
+    assert len(minus_buttons) == 5, f"expected 5 minus buttons, got {len(minus_buttons)}"
     for b in plus_buttons:
         click(b); click(b)
     b = plus_buttons[0]
@@ -592,8 +593,8 @@ safe("start session", step_start_session)
 def step_add_set_via_stepper():
     go("program")
     plus_buttons = find_all_text(program_screen, "+")
-    assert len(plus_buttons) >= 3, f"expected >=3 plus buttons in active session, got {len(plus_buttons)}"
-    for b in plus_buttons[:3]:
+    assert len(plus_buttons) >= 2, f"expected >=2 plus buttons in active session, got {len(plus_buttons)}"
+    for b in plus_buttons[:2]:
         for _ in range(3):
             click(b)
     add_set_btn = find_text(program_screen, "+ SETİ EKLE")
@@ -1342,7 +1343,7 @@ def step_library_rename_exercise_keeps_history():
         row = row.parent
     assert row is not None, "satir dokunulabilir (_TapCard) degil"
     row.dispatch("on_release")
-    popup = top_popup("Hareketi Yeniden Adlandır")
+    popup = top_popup("Hareketi Düzenle")
     assert popup is not None, "yeniden adlandirma popup'i acilmadi"
     ti = [w for w in popup.walk() if isinstance(w, _TI)][0]
     assert ti.text == "Yanlis Isim"
@@ -1378,7 +1379,7 @@ safe("stepper: parmak dugme disinda birakilinca tekrar durur", step_stepper_slid
 
 
 def _card_steppers(screen):
-    """Aktif antrenman ekranindaki +/- sayaclari (agirlik, tekrar, RIR sirasiyla)."""
+    """Aktif antrenman ekranindaki +/- sayaclari (agirlik, tekrar sirasiyla)."""
     from kivy.uix.boxlayout import BoxLayout as _BL
     return [w for w in screen.walk() if isinstance(w, _BL) and hasattr(w, "value")]
 
@@ -1394,18 +1395,18 @@ def _fresh_free_session_with(exercise):
 
 def step_zero_kg_set_can_be_logged_and_form_remembers_last_values():
     _fresh_free_session_with("Chin-up")
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     w.value, r.value = 0.0, 8
     click(find_text(program_screen, "+ SETİ EKLE"))
     sets = app.state["activeSession"]["exercises"][0]["sets"]
     assert len(sets) == 1 and sets[0]["weight"] == 0.0 and sets[0]["reps"] == 8, "0 kg set kaydedilmedi"
 
     # Ikinci set: form son girilen degerlerle (0 kg x 8) acilmali
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     assert (w.value, r.value) == (0.0, 8), f"form son degerleri hatirlamadi: {w.value}, {r.value}"
     w.value, r.value = 85.0, 7
     click(find_text(program_screen, "+ SETİ EKLE"))
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     assert (w.value, r.value) == (85.0, 7), "form son girilen degerleri tutmali"
     app.state["activeSession"] = None
 
@@ -1416,12 +1417,12 @@ safe("active session: 0 kg set works and form remembers last values",
 def step_set_numbering_skips_warmups():
     _fresh_free_session_with("Squat")
     from kivy.uix.togglebutton import ToggleButton as _TB
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
     w.value, r.value = 40.0, 10
     tb.state = "down"
     click(find_text(program_screen, "+ SETİ EKLE"))      # isinma
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
     tb.state = "normal"
     w.value, r.value = 80.0, 5
@@ -1563,7 +1564,7 @@ def step_rest_timer_starts_after_working_set_and_can_be_controlled():
     assert find_text(program_screen, "DİNLENME  1:30", exact=False) is not None, "bosta varsayilan sure gorunmeli"
 
     # isinma seti sayaci BASLATMAZ
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
     w.value, r.value = 40.0, 10
     tb.state = "down"
@@ -1571,7 +1572,7 @@ def step_rest_timer_starts_after_working_set_and_can_be_controlled():
     assert program_screen.rest_mode() == "idle", "isinma seti dinlenme sayacini baslatmamali"
 
     # calisma seti baslatir
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     tb = [x for x in program_screen.walk() if isinstance(x, _TB)][0]
     tb.state = "normal"
     w.value, r.value = 80.0, 5
@@ -1623,7 +1624,7 @@ safe("rest timer: starts after working set, adjustable, skippable, stops on fini
 def step_removed_set_can_be_undone():
     _fresh_free_session_with("Squat")
     for wt, rp in ((60.0, 8), (80.0, 5), (100.0, 3)):
-        w, r, rir = _card_steppers(program_screen)[:3]
+        w, r = _card_steppers(program_screen)[:2]
         w.value, r.value = wt, rp
         click(find_text(program_screen, "+ SETİ EKLE"))
     sets = lambda: [x["weight"] for x in app.state["activeSession"]["exercises"][0]["sets"]]
@@ -1652,7 +1653,7 @@ safe("active session: removed set can be undone", step_removed_set_can_be_undone
 
 def step_set_can_be_edited_by_tapping():
     _fresh_free_session_with("Squat")
-    w, r, rir = _card_steppers(program_screen)[:3]
+    w, r = _card_steppers(program_screen)[:2]
     w.value, r.value = 80.0, 5
     click(find_text(program_screen, "+ SETİ EKLE"))
     lbl = find_text(program_screen, "80kg × 5")
@@ -1665,12 +1666,12 @@ def step_set_can_be_edited_by_tapping():
     popup = top_popup("Seti Düzenle")
     assert popup is not None, "set duzenleme penceresi acilmadi"
     from kivy.uix.boxlayout import BoxLayout as _BL
-    ew, er, erir = [x for x in popup.walk() if isinstance(x, _BL) and hasattr(x, "value")][:3]
+    ew, er = [x for x in popup.walk() if isinstance(x, _BL) and hasattr(x, "value")][:2]
     assert (ew.value, er.value) == (80.0, 5)
-    ew.value, er.value, erir.value = 82.5, 4, 2
+    ew.value, er.value = 82.5, 4
     click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
     st = app.state["activeSession"]["exercises"][0]["sets"][0]
-    assert (st["weight"], st["reps"], st["rir"]) == (82.5, 4, 2), st
+    assert (st["weight"], st["reps"]) == (82.5, 4), st
     assert find_text(program_screen, "82.5kg × 4") is not None, "kart yenilenmedi"
     assert top_popup("Seti Düzenle") is None, "kaydedince pencere kapanmali"
 
@@ -1704,7 +1705,7 @@ def step_progress_badge_shows_done_over_target():
     program_screen.render()
     assert find_text(program_screen, "0/2 SET", exact=False) is not None
     for _ in range(2):
-        w, r, rir = _card_steppers(program_screen)[:3]
+        w, r = _card_steppers(program_screen)[:2]
         w.value, r.value = 100.0, 5
         click(find_text(program_screen, "+ SETİ EKLE"))
         if _ == 0:
@@ -1715,6 +1716,121 @@ def step_progress_badge_shows_done_over_target():
     app.state["activeSession"] = None
 
 safe("active session: progress badge shows done/target", step_progress_badge_shows_done_over_target)
+
+
+def _hist_session(name, sets, started_at, sid, day_id=None):
+    return {"id": sid, "startedAt": started_at, "dayId": day_id, "dayName": None, "isDeload": False,
+            "note": "", "exercises": [{"name": name, "sets": [{"weight": w, "reps": r} for w, r in sets]}]}
+
+
+def step_suggestion_line_explains_why():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    app.state["history"] = []
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Leg Press", target_sets=3,
+                                 target_reps_min=8, target_reps_max=12)
+    app.state["history"] = [_hist_session("Leg Press", [(100, 12)] * 3, 1000, "h1", day["id"])]
+    core.start_session(app.state, day["id"])
+    go("program"); program_screen.render()
+    assert find_text(program_screen, "tavandasın (1/2 antrenman)", exact=False) is not None, "bekleme gerekcesi yok"
+    assert find_text(program_screen, "RIR", exact=False) is None, "RIR arayuzde gorunmemeli"
+    app.state["activeSession"] = None
+
+    app.state["history"].insert(0, _hist_session("Leg Press", [(100, 12)] * 3, 2000, "h2", day["id"]))
+    core.start_session(app.state, day["id"])
+    program_screen.render()
+    assert find_text(program_screen, "artış zamanı", exact=False) is not None, "artis gerekcesi yok"
+    assert find_text(program_screen, "102.5", exact=False) is not None
+    app.state["activeSession"] = None
+
+    app.state["history"][0] = _hist_session("Leg Press", [(100, 12)] * 2, 2000, "h2", day["id"])
+    core.start_session(app.state, day["id"])
+    program_screen.render()
+    assert find_text(program_screen, "2/3 set yapılmış", exact=False) is not None, "eksik set gerekcesi yok"
+    app.state["activeSession"] = None
+    app.state["history"] = []
+
+safe("suggestion line explains why (wait / ready / incomplete), no RIR shown",
+     step_suggestion_line_explains_why)
+
+
+def step_increment_step_chooser_in_hedef_popup_changes_form_step_and_suggestion():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    app.state["incrementSteps"] = {}
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Leg Press", target_sets=2,
+                                 target_reps_min=8, target_reps_max=12)
+    go("program"); program_screen.render()
+    program_screen.open_target_editor(day, "Leg Press")
+    popup = top_popup("Hedef")
+    assert popup is not None
+    assert find_text(popup, "Artış adımı (makineye göre)") is not None
+    click(find_text(popup, "5 KG"))
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    assert app.state["incrementSteps"].get("Leg Press") == 5.0, app.state["incrementSteps"]
+
+    # set formundaki agirlik sayaci artik 5'er artar
+    app.state["history"] = [_hist_session("Leg Press", [(60, 12)] * 2, 1000, "a", day["id"]),
+                            _hist_session("Leg Press", [(60, 12)] * 2, 2000, "b", day["id"])]
+    core.start_session(app.state, day["id"])
+    program_screen.render()
+    w = _card_steppers(program_screen)[0]
+    assert w.value == 65.0, f"oneri 60+5=65 olmali: {w.value}"
+    plus = [b for b in find_all_text(program_screen, "+")][0]
+    click(plus)
+    assert w.value == 70.0, f"sayac 5'er artmali: {w.value}"
+
+    # varsayilana donus
+    app.state["activeSession"] = None
+    program_screen.open_target_editor(day, "Leg Press")
+    popup = top_popup("Hedef")
+    click(find_text(popup, "VARSAYILAN"))
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    assert "Leg Press" not in app.state["incrementSteps"]
+    app.state["history"] = []
+
+safe("Hedef popup: increment step chooser sets per-exercise step (form + suggestion)",
+     step_increment_step_chooser_in_hedef_popup_changes_form_step_and_suggestion)
+
+
+def step_library_popup_saves_step_and_rename_carries_it():
+    app.state["incrementSteps"] = {}
+    app.state["history"] = [_hist_session("Machine Row", [(40, 10)], 1000, "m1")]
+    go("library"); library_screen.render()
+    library_screen.open_rename("Machine Row")
+    popup = top_popup("Hareketi Düzenle")
+    assert popup is not None
+    click(find_text(popup, "5 KG"))
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    assert app.state["incrementSteps"].get("Machine Row") == 5.0
+
+    library_screen.open_rename("Machine Row")
+    popup = top_popup("Hareketi Düzenle")
+    from kivy.uix.textinput import TextInput as _TI2
+    ti = [w for w in popup.walk() if isinstance(w, _TI2)][0]
+    ti.text = "Seated Machine Row"
+    click(find_text(popup, "10 KG"))
+    click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
+    assert app.state["history"][0]["exercises"][0]["name"] == "Seated Machine Row"
+    assert app.state["incrementSteps"].get("Seated Machine Row") == 10.0
+    app.state["history"] = []
+    app.state["incrementSteps"] = {}
+
+safe("library: edit popup saves increment step (with and without rename)",
+     step_library_popup_saves_step_and_rename_carries_it)
+
+
+def step_settings_progression_sessions_toggle():
+    app.state["settings"]["progressionSessions"] = 2
+    go("settings"); settings_screen.render()
+    click(find_text(settings_screen, "1 ANTRENMAN"))
+    assert app.state["settings"]["progressionSessions"] == 1
+    click(find_text(settings_screen, "2 ANTRENMAN"))
+    assert app.state["settings"]["progressionSessions"] == 2
+
+safe("settings: progression sessions toggle (1 / 2)", step_settings_progression_sessions_toggle)
 
 
 print()

@@ -475,8 +475,41 @@ def increment_category_for(name, state=None):
     return EXERCISE_INCREMENT.get(name, "compound")
 
 
+INCREMENT_STEP_CHOICES_KG = (1.25, 2.5, 5.0, 10.0)
+MAX_INCREMENT_STEP_KG = 50.0
+
+
+def custom_increment_step(name, state):
+    """Kullanicinin bu hareket icin (makineye gore) sectigi artis adimi (kg);
+    secilmemis ya da gecersizse None."""
+    if state is None:
+        return None
+    v = _num((state.get("incrementSteps") or {}).get(name))
+    if v is not None and 0 < v <= MAX_INCREMENT_STEP_KG:
+        return v
+    return None
+
+
 def increment_for(name, state=None):
+    """Hareketin agirlik artis adimi (kg): once kullanicinin sectigi adim
+    (state["incrementSteps"]), yoksa kategori varsayilani."""
+    custom = custom_increment_step(name, state)
+    if custom is not None:
+        return custom
     return INCREMENT_CATEGORIES[increment_category_for(name, state)]
+
+
+def set_increment_step(state, name, step_kg):
+    """Hareket icin artis adimini ayarlar (None = varsayilana don). Gecersiz
+    deger ValueError, hicbir sey degismez."""
+    steps = state.setdefault("incrementSteps", {})
+    if step_kg is None:
+        steps.pop(name, None)
+        return
+    v = _num(step_kg)
+    if v is None or not (0 < v <= MAX_INCREMENT_STEP_KG):
+        raise ValueError("gecersiz artis adimi")
+    steps[name] = round(v, 4)
 
 
 def clean_name(name):
@@ -539,10 +572,12 @@ def default_state():
         "program": {"days": []},
         "muscleGroups": {},
         "incrementOverrides": {},
+        "incrementSteps": {},
         "hiddenDefaults": [],
         "bodyweightLog": [],
         "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0,
-                     "restSeconds": DEFAULT_REST_SECONDS},
+                     "restSeconds": DEFAULT_REST_SECONDS,
+                     "progressionSessions": 2},
     }
 
 
@@ -713,12 +748,17 @@ def sanitize_state(data):
     if settings.get("weightUnit") not in ("kg", "lb"):
         settings["weightUnit"] = "kg"
     settings["restSeconds"] = clamp_rest_seconds(settings.get("restSeconds"))
+    settings["progressionSessions"] = 1 if _num(settings.get("progressionSessions")) == 1 else 2
     st["settings"] = settings
 
     if not isinstance(st.get("muscleGroups"), dict) or not st["muscleGroups"]:
         st["muscleGroups"] = dict(MUSCLE_GROUP_DEFAULTS)
     if not isinstance(st.get("incrementOverrides"), dict):
         st["incrementOverrides"] = {}
+    if not isinstance(st.get("incrementSteps"), dict):
+        st["incrementSteps"] = {}
+    st["incrementSteps"] = {k: v for k, v in st["incrementSteps"].items()
+                            if isinstance(k, str) and custom_increment_step(k, st) is not None}
     if not isinstance(st.get("hiddenDefaults"), list):
         st["hiddenDefaults"] = []
     if not isinstance(st.get("bodyweightLog"), list):
@@ -995,34 +1035,86 @@ def history_for_exercise(state, name):
     return pts
 
 
-def suggested_weight_for(state, name, target_min, target_max):
-    """Cift ilerleme: tavana ulastiysa agirlik artir, tabanin altinda kaldiysa
-    ayni agirlik, aradaysa ayni agirlik (bu sefer tavana ulasmaya calis)."""
-    for s in _history_newest_first(state):
-        if s.get("isDeload"):
+PLATEAU_SESSIONS = 4
+
+
+def _exercise_records(state, name, limit=PLATEAU_SESSIONS):
+    """Hareketin gecmisteki (deload HARIC, calisma seti olan) antrenman
+    kayitlari, en yeniden eskiye: her biri en agir ağırlık ve o agirliktaki setler."""
+    records = []
+    for sess in _history_newest_first(state):
+        if sess.get("isDeload"):
             continue
-        ex = next((e for e in s["exercises"] if e["name"] == name), None)
+        ex = next((e for e in sess["exercises"] if e["name"] == name), None)
         if not ex:
             continue
         working = [st for st in ex["sets"] if not st.get("isWarmup")]
         if not working:
             continue
-        last_weight = max(st["weight"] for st in working)
-        # Sadece EN AGIR (ust) setlere bakiyoruz: hafif bir geri-cekilme (back-off)
-        # seti tavan tekrara ulasti diye gereksiz agirlik artisi onerilmesin,
-        # ya da hafif bir set tabanin altinda kaldi diye yanlis "below" cikmasin.
-        top = [st for st in working if st["weight"] == last_weight]
-        below_floor = target_min is not None and any(st["reps"] < target_min for st in top)
-        at_ceiling = target_max is not None and all(st["reps"] >= target_max for st in top)
-        if below_floor:
-            return {"weight": last_weight, "reason": "below"}
-        if at_ceiling:
-            inc = increment_for(name, state)
-            if inc > 0:
-                return {"weight": round(last_weight + inc, 2), "reason": "ceiling"}
-            return {"weight": last_weight, "reason": "ceiling-bw"}
-        return {"weight": last_weight, "reason": "inrange"}
-    return None
+        top_w = max(st["weight"] for st in working)
+        top = [st for st in working if st["weight"] == top_w]
+        records.append({"weight": top_w, "top": top, "reps": sum(st["reps"] for st in top)})
+        if len(records) >= limit:
+            break
+    return records
+
+
+def suggested_weight_for(state, name, target_min, target_max, target_sets=None):
+    """Cift ilerleme (double progression), RIR kullanmadan.
+
+    Artis onerisi icin SON N antrenmanin (N = ayarlardan 1 ya da 2, varsayilan 2)
+    HEPSINDE ayni agirlikta: (1) hedef set sayisi kadar set yapilmis ve
+    (2) hepsi tekrar tavaninda olmali. Sadece en agir ağırlıktaki setlere bakilir
+    (hafif geri cekilme setleri hesabi bozmaz).
+
+    Donus: None ya da {"weight", "reason", "plateau", ...bilgi alanlari}
+      reason: "below" (tabanin altinda) | "inrange" (aralikta) |
+              "incomplete" (tavan tamam ama hedef set eksik) |
+              "ceiling-wait" (tavan tamam, gereken antrenman sayisi dolmadi) |
+              "ceiling" (artis zamani) | "ceiling-bw" (vucut agirligi: tekrar artir)
+    """
+    records = _exercise_records(state, name)
+    if not records:
+        return None
+    need = 1 if _num((state.get("settings") or {}).get("progressionSessions")) == 1 else 2
+
+    def ready(rec):
+        if target_max is None or not all(st["reps"] >= target_max for st in rec["top"]):
+            return False
+        return target_sets is None or len(rec["top"]) >= target_sets
+
+    latest = records[0]
+    w = latest["weight"]
+    info = {"sets_done": len(latest["top"]), "sets_target": target_sets,
+            "need": need, "streak": 0, "plateau": False}
+
+    # Plato: ayni agirlikta 4 antrenman ve toplam tekrar hic artmadi
+    if len(records) >= PLATEAU_SESSIONS and all(r["weight"] == w for r in records):
+        if latest["reps"] <= max(r["reps"] for r in records[1:]):
+            info["plateau"] = True
+
+    below_floor = target_min is not None and any(st["reps"] < target_min for st in latest["top"])
+    if below_floor:
+        return {"weight": w, "reason": "below", **info}
+
+    if target_max is not None and all(st["reps"] >= target_max for st in latest["top"]):
+        if target_sets is not None and len(latest["top"]) < target_sets:
+            return {"weight": w, "reason": "incomplete", **info}
+        streak = 0
+        for rec in records:
+            if rec["weight"] == w and ready(rec):
+                streak += 1
+            else:
+                break
+        info["streak"] = streak
+        info["plateau"] = False  # tavandayken ilerleme var
+        if streak < need:
+            return {"weight": w, "reason": "ceiling-wait", **info}
+        inc = increment_for(name, state)
+        if inc > 0:
+            return {"weight": round(w + inc, 2), "reason": "ceiling", "step": inc, **info}
+        return {"weight": w, "reason": "ceiling-bw", **info}
+    return {"weight": w, "reason": "inrange", **info}
 
 
 def start_session(state, day_id=None, is_deload=False):
@@ -1042,7 +1134,8 @@ def start_session(state, day_id=None, is_deload=False):
                 if is_deload and target_sets:
                     target_sets = max(1, round(target_sets * 0.6))
                 suggestion = None if is_deload else suggested_weight_for(
-                    state, item["name"], item.get("targetRepsMin"), item.get("targetRepsMax"))
+                    state, item["name"], item.get("targetRepsMin"), item.get("targetRepsMax"),
+                    item.get("targetSets"))
                 exercises.append({
                     "name": item["name"], "sets": [],
                     "targetSets": target_sets,
@@ -1051,6 +1144,8 @@ def start_session(state, day_id=None, is_deload=False):
                     "restSeconds": item.get("restSeconds"),
                     "suggestedWeight": suggestion["weight"] if suggestion else None,
                     "suggestReason": suggestion["reason"] if suggestion else None,
+                    "suggestInfo": ({k: v for k, v in suggestion.items()
+                                     if k not in ("weight", "reason")} if suggestion else None),
                     # Antrenman SIRASINDA da hareket notunu gorebilsin diye
                     # (kullanicidan gelen istek) - programdaki notu aktif
                     # seansa da tasiyoruz, bkz. screens/program.py
@@ -1279,6 +1374,10 @@ def rename_exercise(state, old, new):
                 e["name"] = new
     if new not in EXERCISE_INCREMENT:
         state.setdefault("incrementOverrides", {})[new] = cat
+    # Kullanicinin makineye gore sectigi artis adimi da yeni ada tasinir.
+    steps = state.setdefault("incrementSteps", {})
+    if old in steps and new not in steps:
+        steps[new] = steps[old]
     # Hazir bir hareketin eski adi secicide kalmasin.
     hidden = state.setdefault("hiddenDefaults", [])
     if old in DEFAULT_EXERCISES and old not in hidden:

@@ -32,7 +32,7 @@ from shared import (
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
     make_stepper, mono_label, ClickableRow, _PickerRow, parse_day_name, tr_upper,
     toast, target_label, _find_scrollview, exercise_search_input, note_input,
-    round_display_weight, fmt_clock, vibrate,
+    round_display_weight, fmt_clock, vibrate, make_increment_chooser,
 )
 
 
@@ -42,6 +42,46 @@ SUGGEST_TEXT = {
     "below": "aynı ağırlık — geçen sefer bazı setler hedefin altında kaldı",
     "inrange": "aynı ağırlık — bu sefer aralığın tavanına ulaşmaya çalış",
 }
+
+
+def _kg_step_text(kg):
+    v = round_display_weight(to_display_weight(kg))
+    return f"{v:g}{weight_unit()}"
+
+
+def _form_weight_step(state, name):
+    """Set formundaki agirlik +/- adimi: hareket icin makineye gore ozel adim
+    secilmisse o (gosterim biriminde), yoksa eski varsayilan (2.5 kg / 5 lb)."""
+    default = 2.5 if weight_unit() == "kg" else 5
+    custom = core.custom_increment_step(name, state)
+    if custom is None:
+        return default
+    v = round_display_weight(to_display_weight(custom))
+    return v if v and v > 0 else default
+
+
+def suggest_text(ex):
+    """Oneri satirinin aciklamasi: NEDEN bu oneri cikti (hangi kosul saglandi /
+    ne eksik). Eski (bilgisiz) aktif seanslarda sabit metne duser."""
+    reason = ex.get("suggestReason")
+    info = ex.get("suggestInfo") or {}
+    need = info.get("need") or 2
+    streak = info.get("streak") or 0
+    if reason == "ceiling" and info:
+        txt = f"artış zamanı: son {need} antrenmanda tüm setlerde tavana ulaştın"
+        if info.get("step"):
+            txt += f" (+{_kg_step_text(info['step'])})"
+    elif reason == "ceiling-wait":
+        txt = (f"tavandasın ({streak}/{need} antrenman) · artış için tavana "
+               f"{need - streak} antrenman daha ulaş")
+    elif reason == "incomplete":
+        txt = (f"tavan tamam ama {info.get('sets_done', 0)}/{info.get('sets_target')} set "
+               "yapılmış · önce hedef setleri tamamla")
+    else:
+        txt = SUGGEST_TEXT.get(reason, "")
+    if info.get("plateau"):
+        txt += " · Son 4 antrenmandır ilerleme yok: deload ya da hareketi değiştirmeyi düşün"
+    return txt
 
 
 class ProgramScreen(Screen):
@@ -531,7 +571,7 @@ class ProgramScreen(Screen):
         w_step = 2.5 if weight_unit() == "kg" else 5
         w_i = make_stepper(f"Ağırlık ({weight_unit()})", round_display_weight(to_display_weight(existing.get("targetWeight"))),
                             step=w_step, decimals=True)
-        rir_i = make_stepper("RIR", existing.get("targetRIR"), step=1, max_val=10)
+        step_c = make_increment_chooser(state, name)
         rest_i = make_stepper("Dinlenme (sn)", existing.get("restSeconds"), step=15)
         # KOK NEDEN (detayli incelemede bulundu): 6 stepper + not alani ~610dp,
         # telefon penceresinde (ozellikle not klavyesi acikken) popup'in
@@ -543,7 +583,7 @@ class ProgramScreen(Screen):
         body = ScrollView(size_hint_y=None, do_scroll_x=False, bar_width=dp(3))
         body.add_widget(inner)
         content.add_widget(body)
-        for w in (sets_i, rmin_i, rmax_i, w_i, rir_i, rest_i):
+        for w in (sets_i, rmin_i, rmax_i, w_i, step_c, rest_i):
             inner.add_widget(w)
 
         # UX (kullanicidan gelen istek - "bazı hareketlere not eklemek
@@ -604,9 +644,10 @@ class ProgramScreen(Screen):
                 target_sets=to_num(sets_i.value), target_reps_min=to_num(rmin_i.value),
                 target_reps_max=to_num(rmax_i.value),
                 target_weight=to_storage_kg(to_num(w_i.value, float)),
-                target_rir=to_num(rir_i.value), rest_seconds=to_num(rest_i.value),
+                target_rir=existing.get("targetRIR"), rest_seconds=to_num(rest_i.value),
                 note=note_i.text.strip(),
             )
+            core.set_increment_step(state, name, step_c.value)
             app.save()
             # search.focus = False (bkz. _build_exercise_picker'daki pick()
             # icindeki AYNI desen) - not alaninda hala odak/klavye acikken
@@ -991,10 +1032,9 @@ class ProgramScreen(Screen):
             content.bind(minimum_height=content.setter("height"))
             w_max = 500 if weight_unit() == "kg" else 1100
             ew = make_stepper(f"Ağırlık ({weight_unit()})", w0,
-                              step=2.5 if weight_unit() == "kg" else 5, decimals=True, max_val=w_max)
+                              step=_form_weight_step(state, ex["name"]), decimals=True, max_val=w_max)
             er = make_stepper("Tekrar", r0, step=1)
-            erir = make_stepper("RIR", st.get("rir"), step=1, max_val=10)
-            for wdg in (ew, er, erir):
+            for wdg in (ew, er):
                 content.add_widget(wdg)
             save_btn = styled_button("Kaydet", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1))
             content.add_widget(save_btn)
@@ -1009,9 +1049,9 @@ class ProgramScreen(Screen):
                 # Agirlik DEGISMEDIYSE depodaki kesin kg degeri korunur (lb
                 # yuvarlamasi kayitli veriyi sessizce oynatmasin).
                 new_w = st["weight"] if w == w0 else to_storage_kg(w)
-                rir = int(erir.value) if erir.value is not None else None
                 try:
-                    core.update_set(state, idx, si, new_w, int(r), rir)
+                    # Eski kayitlarda RIR varsa korunur (ekranda gosterilmez).
+                    core.update_set(state, idx, si, new_w, int(r), st.get("rir"))
                 except ValueError:
                     toast(app, "Geçerli değer gir")
                     return
@@ -1051,10 +1091,13 @@ class ProgramScreen(Screen):
                 tgt_row.add_widget(mono_label(tgt, size=14, color=TEXT))
                 card.add_widget(tgt_row)
             if ex.get("suggestedWeight") is not None:
-                txt = f"{fmt_weight(ex['suggestedWeight'])} — {SUGGEST_TEXT.get(ex.get('suggestReason'), '')}"
+                txt = f"{fmt_weight(ex['suggestedWeight'])} — {suggest_text(ex)}"
+                sug_lbl = label(txt, size=14, color=STEEL)
                 sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
                 sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
-                sug_row.add_widget(label(txt, size=14, color=STEEL))
+                sug_row.add_widget(sug_lbl)
+                # Gerekce uzun olabilir: satir, metnin yuksekligine gore buyur (kirpilmaz).
+                sug_lbl.bind(height=lambda _w, h: setattr(sug_row, "height", max(dp(30), h)))
                 card.add_widget(sug_row)
             if ex.get("note"):
                 # UX (kullanicidan gelen istek - "bazı hareketlere not
@@ -1085,10 +1128,6 @@ class ProgramScreen(Screen):
                 tap = ClickableRow(size_hint_x=1, spacing=dp(6))
                 tap.add_widget(mono_label(f"{fmt_weight(s['weight'])} × {s['reps']}", size=14,
                                            color=FAINT if s.get("isWarmup") else TEXT))
-                badge = core.rir_badge_info(s, ex)
-                if badge:
-                    badge_color = {"easy": ACCENT, "hard": DANGER, "ontarget": STEEL, "neutral": MUTED}[badge["kind"]]
-                    tap.add_widget(mono_label(badge["text"], size=14, color=badge_color, halign="right"))
                 tap.bind(on_release=lambda *_a, j=si: open_edit(j))
                 row.add_widget(tap)
                 rm = Button(text="×", size_hint=(None, None), size=(ICON_BTN_SIZE, ICON_BTN_SIZE), background_color=TRANSPARENT, color=MUTED, font_size=sp_(17))
@@ -1107,8 +1146,7 @@ class ProgramScreen(Screen):
             _sw = ex.get("suggestedWeight") or ex.get("targetWeight")
             _w0 = last["w"] if last["w"] is not None else round_display_weight(to_display_weight(_sw))
             _r0 = last["r"] if last["r"] is not None else ex.get("targetRepsMin")
-            _rir0 = last["rir"] if last["rir"] is not None else ex.get("targetRIR")
-            w_step = 2.5 if weight_unit() == "kg" else 5
+            w_step = _form_weight_step(state, ex["name"])
             form = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
             # max_val: sayaç mekanizmasında (make_stepper/make_hold) olası bir
             # hatada bile deger anlamsiz seviyelere (500kg+) kacamasin diye
@@ -1123,10 +1161,7 @@ class ProgramScreen(Screen):
             card.add_widget(form)
 
             extra = BoxLayout(size_hint_y=None, height=dp(58), spacing=dp(8))
-            rir_stepper = make_stepper("RIR", _rir0, step=1, max_val=10, btn_width=dp(36))
-            rir_stepper.size_hint_x = 0.4
-            warm_toggle = ToggleButton(text="Isınma Seti", size_hint_x=0.6, background_normal="", background_down="", background_color=RAISED, color=TEXT)
-            extra.add_widget(rir_stepper)
+            warm_toggle = ToggleButton(text="Isınma Seti", background_normal="", background_down="", background_color=RAISED, color=TEXT)
             extra.add_widget(warm_toggle)
             card.add_widget(extra)
 
@@ -1141,7 +1176,7 @@ class ProgramScreen(Screen):
                 if w is None or not r:
                     toast(app, "Geçerli değer gir")
                     return
-                rir = int(rir_stepper.value) if rir_stepper.value is not None else None
+                rir = None
                 is_warm = warm_toggle.state == "down"
                 # Kullanici agirligi kendi sectigi birimde (kg ya da lb) girdi -
                 # depoya HER ZAMAN kg olarak yaziyoruz (bkz. dosyanin basindaki

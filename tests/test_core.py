@@ -399,11 +399,12 @@ def test_suggested_weight_below_floor_keeps_same_weight():
     state = core.default_state()
     state["history"] = [make_history_session("Bench Press", [make_set(80, 4)])]  # hedef min 6, 4 < 6
     result = core.suggested_weight_for(state, "Bench Press", target_min=6, target_max=8)
-    assert result == {"weight": 80, "reason": "below"}
+    assert result["weight"] == 80 and result["reason"] == "below"
 
 
 def test_suggested_weight_at_ceiling_increments():
     state = core.default_state()
+    state["settings"]["progressionSessions"] = 1
     state["history"] = [make_history_session("Bench Press", [make_set(80, 8), make_set(80, 9)])]
     result = core.suggested_weight_for(state, "Bench Press", target_min=6, target_max=8)
     assert result["reason"] == "ceiling"
@@ -414,7 +415,7 @@ def test_suggested_weight_in_range_keeps_same_weight():
     state = core.default_state()
     state["history"] = [make_history_session("Bench Press", [make_set(80, 7)])]
     result = core.suggested_weight_for(state, "Bench Press", target_min=6, target_max=8)
-    assert result == {"weight": 80, "reason": "inrange"}
+    assert result["weight"] == 80 and result["reason"] == "inrange"
 
 
 def test_suggested_weight_ignores_deload_sessions():
@@ -434,6 +435,7 @@ def test_suggested_weight_returns_none_with_no_history():
 
 def test_suggested_weight_bodyweight_exercise_stays_same_at_ceiling():
     state = core.default_state()
+    state["settings"]["progressionSessions"] = 1
     state["history"] = [make_history_session("Chin-up", [make_set(0, 10), make_set(0, 10)])]
     result = core.suggested_weight_for(state, "Chin-up", target_min=6, target_max=8)
     assert result["reason"] == "ceiling-bw"
@@ -1002,6 +1004,7 @@ def test_history_order_does_not_depend_on_list_order():
     new = {"id": "n", "startedAt": 200, "exercises": [{"name": "A", "sets": [{"weight": 60, "reps": 8}]}]}
     old = {"id": "o", "startedAt": 100, "exercises": [{"name": "A", "sets": [{"weight": 50, "reps": 8}]}]}
     st["history"] = [old, new]        # bozuk sira
+    st["settings"]["progressionSessions"] = 1
     assert [p["max"] for p in core.history_for_exercise(st, "A")] == [50, 60]
     assert core.suggested_weight_for(st, "A", 8, 8)["weight"] == 62.5
 
@@ -1013,3 +1016,116 @@ def test_set_day_exercise_target_copies_muscle_group_list():
     core.set_day_exercise_target(st, "d", "A", muscle_groups=groups)
     groups.append("Biceps")
     assert st["muscleGroups"]["A"] == ["Sırt"]
+
+
+# ---------------------------------------------------------------------------
+# Yeni artis kurallari (RIR'siz): hedef set, tavan, N antrenman, plato, adim
+# ---------------------------------------------------------------------------
+def _hist(name, sessions, **kw):
+    """sessions: en ESKIDEN yeniye [[(agirlik, tekrar), ...], ...]"""
+    return [make_history_session(name, [make_set(w, r) for w, r in sets],
+                                 started_at=1000 + i, session_id=f"s{i}", **kw)
+            for i, sets in enumerate(sessions)]
+
+
+def test_progression_needs_two_sessions_by_default():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3])
+    r = core.suggested_weight_for(st, "Leg Press", 8, 12, 3)
+    assert r["reason"] == "ceiling-wait" and r["weight"] == 100 and r["streak"] == 1 and r["need"] == 2
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 3])
+    r = core.suggested_weight_for(st, "Leg Press", 8, 12, 3)
+    assert r["reason"] == "ceiling" and r["weight"] == 102.5 and r["streak"] == 2
+
+
+def test_progression_setting_one_session_increments_immediately():
+    st = core.default_state()
+    st["settings"]["progressionSessions"] = 1
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3])
+    assert core.suggested_weight_for(st, "Leg Press", 8, 12, 3)["reason"] == "ceiling"
+
+
+def test_progression_requires_all_target_sets_at_top_weight():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 2])
+    r = core.suggested_weight_for(st, "Leg Press", 8, 12, 3)
+    assert r["reason"] == "incomplete" and r["sets_done"] == 2 and r["sets_target"] == 3
+    # hedef set girilmemisse set sarti uygulanmaz
+    r = core.suggested_weight_for(st, "Leg Press", 8, 12, None)
+    assert r["reason"] == "ceiling"
+
+
+def test_progression_streak_broken_by_weight_change_or_missed_ceiling():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(95, 12)] * 3, [(100, 12)] * 3])   # onceki farkli agirlik
+    assert core.suggested_weight_for(st, "Leg Press", 8, 12, 3)["reason"] == "ceiling-wait"
+    st["history"] = _hist("Leg Press", [[(100, 10)] * 3, [(100, 12)] * 3])  # onceki tavanda degil
+    assert core.suggested_weight_for(st, "Leg Press", 8, 12, 3)["reason"] == "ceiling-wait"
+
+
+def test_progression_after_increase_streak_restarts():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 3, [(102.5, 12)] * 3])
+    r = core.suggested_weight_for(st, "Leg Press", 8, 12, 3)
+    assert r["reason"] == "ceiling-wait" and r["weight"] == 102.5 and r["streak"] == 1
+
+
+def test_plateau_flag_after_four_sessions_without_progress():
+    st = core.default_state()
+    st["history"] = _hist("Row", [[(60, 9)] * 3, [(60, 9)] * 3, [(60, 10), (60, 9), (60, 9)], [(60, 9)] * 3])
+    r = core.suggested_weight_for(st, "Row", 8, 12, 3)
+    assert r["plateau"] is True
+    # son antrenmanda ilerleme varsa plato yok
+    st["history"] = _hist("Row", [[(60, 9)] * 3, [(60, 9)] * 3, [(60, 9)] * 3, [(60, 10)] * 3])
+    assert core.suggested_weight_for(st, "Row", 8, 12, 3)["plateau"] is False
+    # 4'ten az antrenman: plato yok
+    st["history"] = _hist("Row", [[(60, 9)] * 3] * 3)
+    assert core.suggested_weight_for(st, "Row", 8, 12, 3)["plateau"] is False
+
+
+def test_custom_increment_step_used_and_carried_on_rename():
+    st = core.default_state()
+    assert core.increment_for("Leg Press", st) == 2.5
+    core.set_increment_step(st, "Leg Press", 5)
+    assert core.increment_for("Leg Press", st) == 5
+    st["history"] = _hist("Leg Press", [[(60, 12)] * 3, [(60, 12)] * 3])
+    assert core.suggested_weight_for(st, "Leg Press", 8, 12, 3)["weight"] == 65
+    ok, _ = core.rename_exercise(st, "Leg Press", "Hack Squat")
+    assert ok and core.increment_for("Hack Squat", st) == 5
+    core.set_increment_step(st, "Hack Squat", None)
+    assert core.increment_for("Hack Squat", st) == 2.5
+    for bad in (0, -1, 999, "x"):
+        try:
+            core.set_increment_step(st, "Hack Squat", bad)
+            assert False
+        except ValueError:
+            pass
+
+
+def test_custom_step_makes_bodyweight_exercise_loadable():
+    st = core.default_state()
+    core.set_increment_step(st, "Chin-up", 2.5)
+    st["history"] = _hist("Chin-up", [[(0, 8)] * 3, [(0, 8)] * 3])
+    r = core.suggested_weight_for(st, "Chin-up", 6, 8, 3)
+    assert r["reason"] == "ceiling" and r["weight"] == 2.5
+
+
+def test_sanitize_repairs_increment_steps_and_progression_setting():
+    st = core.sanitize_state({"incrementSteps": {"A": 5, "B": -1, "C": "x", "D": 500},
+                              "settings": {"progressionSessions": 7}})
+    assert st["incrementSteps"] == {"A": 5.0}
+    assert st["settings"]["progressionSessions"] == 2
+    assert core.sanitize_state({"settings": {"progressionSessions": 1}})["settings"]["progressionSessions"] == 1
+    assert core.sanitize_state({"incrementSteps": [1]})["incrementSteps"] == {}
+    assert core.default_state()["settings"]["progressionSessions"] == 2
+
+
+def test_start_session_stores_suggestion_info_with_target_sets():
+    st = core.default_state()
+    day = core.add_program_day(st)
+    core.set_day_exercise_target(st, day["id"], "Leg Press", target_sets=3, target_reps_min=8, target_reps_max=12)
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3])
+    sess = core.start_session(st, day["id"])
+    ex = sess["exercises"][0]
+    assert ex["suggestReason"] == "ceiling-wait" and ex["suggestedWeight"] == 100
+    assert ex["suggestInfo"]["streak"] == 1 and ex["suggestInfo"]["need"] == 2 and ex["suggestInfo"]["sets_target"] == 3

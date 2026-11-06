@@ -101,6 +101,28 @@ class SettingsScreen(Screen):
             "diğer ekranlara bir sonraki girişinde yansır.",
             color=FAINT, size=13, height=dp(40)))
 
+        # ---- Agirlik artisi ----
+        col.add_widget(self.section_header("AĞIRLIK ARTIŞI"))
+        cur_need = 1 if (app.state.get("settings") or {}).get("progressionSessions") == 1 else 2
+
+        def set_need(n, *_):
+            app.state.setdefault("settings", {})["progressionSessions"] = n
+            app.save()
+            self.render()
+
+        need_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
+        for n, text in ((1, "1 ANTRENMAN"), (2, "2 ANTRENMAN")):
+            sel = cur_need == n
+            btn = styled_button(text, color=ACCENT if sel else RAISED,
+                                 text_color=ACCENT_DARK if sel else TEXT)
+            btn.bind(on_release=lambda *_, n=n: set_need(n))
+            need_row.add_widget(btn)
+        col.add_widget(need_row)
+        col.add_widget(label(
+            "Artış önerisi için tüm hedef setleri tavan tekrarda tamamlamanın "
+            "kaç antrenman üst üste gerektiği. 2 daha kontrollüdür.",
+            color=FAINT, size=13, height=dp(56)))
+
         # ---- Yedekleme ----
         col.add_widget(self.section_header("YEDEKLEME"))
         last_backup = app.state.get("settings", {}).get("lastBackupAt")

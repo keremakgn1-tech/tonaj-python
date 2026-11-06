@@ -39,6 +39,7 @@ import core
 from shared import (
     MUTED, FAINT, ACCENT, RAISED, TEXT, fmt_weight, Card, label, mono_label,
     exercise_search_input, styled_button, fit_popup_to_content, toast,
+    make_increment_chooser,
 )
 
 
@@ -63,8 +64,10 @@ class LibraryScreen(Screen):
         name_in = exercise_search_input(hint="Yeni hareket adı")
         name_in.text = old_name
         content.add_widget(name_in)
+        step_c = make_increment_chooser(app.state, old_name)
+        content.add_widget(step_c)
         row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        popup = Popup(title="Hareketi Yeniden Adlandır", content=content, size_hint=(0.9, None))
+        popup = Popup(title="Hareketi Düzenle", content=content, size_hint=(0.9, None))
         fit_popup_to_content(popup, content)
 
         def close():
@@ -72,14 +75,25 @@ class LibraryScreen(Screen):
             popup.dismiss(animation=False)
 
         def do_save(*_a):
-            ok, msg = core.rename_exercise(app.state, old_name, name_in.text)
-            if ok:
+            new_name = core.clean_name(name_in.text)
+            if new_name == old_name or not new_name:
+                # Ad degismedi: sadece artis adimi kaydedilir.
+                core.set_increment_step(app.state, old_name, step_c.value)
                 app.save()
                 close()
                 self.render()
-            else:
-                toast(app, msg)
+                toast(app, "Artış adımı kaydedildi")
+                return
+            ok, msg = core.rename_exercise(app.state, old_name, name_in.text)
             if ok:
+                # rename_exercise adimi eski adtan tasidi; secimi YENI ada uygula.
+                final = core.canonical_exercise_name(app.state, new_name)
+                core.set_increment_step(app.state, final, step_c.value)
+                app.save()
+                close()
+                self.render()
+                toast(app, msg)
+            else:
                 toast(app, msg)
 
         save = styled_button("Kaydet")
@@ -128,7 +142,7 @@ class LibraryScreen(Screen):
                 row.bind(on_release=lambda _w, nm=n: self.open_rename(nm))
                 info = BoxLayout(orientation="vertical")
                 info.add_widget(label(n, size=14, bold=True, height=dp(20)))
-                info.add_widget(mono_label(f"{len(pts)} antrenman · adı değiştirmek için dokun", size=13, color=MUTED, height=dp(18)))
+                info.add_widget(mono_label(f"{len(pts)} antrenman · ad ve artış adımı için dokun", size=13, color=MUTED, height=dp(18)))
                 row.add_widget(info)
                 pr_col = BoxLayout(orientation="vertical", size_hint_x=None, width=dp(70))
                 # HATA DUZELTMESI: pts bossa (bu harekete hic set girilmemisse - ör.
