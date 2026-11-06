@@ -29,6 +29,15 @@ jobs:
       - name: Depoyu al
         uses: actions/checkout@v4
 
+      - name: Python 3.11'i sabitle
+        # KOK NEDEN (CI d708717'de bulundu): ubuntu-latest'in varsayilan Python'u
+        # 3.14'e gecti; Kivy 2.3.1'in 3.14 icin hazir paketi (wheel) yok, pip
+        # kaynaktan derlemeye calisip patliyor ("Failed building wheel for kivy").
+        # Uygulama zaten Python 3.11 hedefliyor - ayni surume sabitliyoruz.
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Python bagimliliklarini kur (pytest)
         run: pip install --break-system-packages pytest
 
