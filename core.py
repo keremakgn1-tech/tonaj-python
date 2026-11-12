@@ -485,18 +485,40 @@ def custom_increment_step(name, state):
     if state is None:
         return None
     v = _num((state.get("incrementSteps") or {}).get(name))
-    if v is not None and 0 < v <= MAX_INCREMENT_STEP_KG:
+    if v is not None and MIN_INCREMENT_STEP_KG <= v <= MAX_INCREMENT_STEP_KG:
         return v
     return None
 
 
+DEFAULT_INCREMENT_KG = 2.5
+MIN_INCREMENT_STEP_KG = 0.25
+
+
+def default_increment_kg(state):
+    """Genel (kullanicinin Ayarlar'dan sectigi) varsayilan artis adimi, kg."""
+    v = _num(((state or {}).get("settings") or {}).get("defaultIncrementKg"))
+    if v is not None and MIN_INCREMENT_STEP_KG <= v <= MAX_INCREMENT_STEP_KG:
+        return v
+    return DEFAULT_INCREMENT_KG
+
+
+def default_increment_for(name, state=None):
+    """Hareket icin OZEL adim secilmediginde kullanilan adim: vucut agirligi
+    hareketleri 0 (tekrar artirilir), digerleri genel varsayilan adim. state
+    verilmezse (eski cagrilar) hareket turune gore eski sabit deger."""
+    cat = INCREMENT_CATEGORIES[increment_category_for(name, state)]
+    if cat == 0 or state is None:
+        return cat
+    return default_increment_kg(state)
+
+
 def increment_for(name, state=None):
-    """Hareketin agirlik artis adimi (kg): once kullanicinin sectigi adim
-    (state["incrementSteps"]), yoksa kategori varsayilani."""
+    """Hareketin agirlik artis adimi (kg): once kullanicinin bu hareket icin
+    sectigi adim (state["incrementSteps"]), yoksa genel varsayilan adim."""
     custom = custom_increment_step(name, state)
     if custom is not None:
         return custom
-    return INCREMENT_CATEGORIES[increment_category_for(name, state)]
+    return default_increment_for(name, state)
 
 
 def set_increment_step(state, name, step_kg):
@@ -507,7 +529,7 @@ def set_increment_step(state, name, step_kg):
         steps.pop(name, None)
         return
     v = _num(step_kg)
-    if v is None or not (0 < v <= MAX_INCREMENT_STEP_KG):
+    if v is None or not (MIN_INCREMENT_STEP_KG <= v <= MAX_INCREMENT_STEP_KG):
         raise ValueError("gecersiz artis adimi")
     steps[name] = round(v, 4)
 
@@ -577,7 +599,8 @@ def default_state():
         "bodyweightLog": [],
         "settings": {"lastBackupAt": None, "weightUnit": "kg", "fontScale": 1.0,
                      "restSeconds": DEFAULT_REST_SECONDS,
-                     "progressionSessions": 2},
+                     "progressionSessions": 2,
+                     "defaultIncrementKg": DEFAULT_INCREMENT_KG},
     }
 
 
@@ -748,6 +771,7 @@ def sanitize_state(data):
     if settings.get("weightUnit") not in ("kg", "lb"):
         settings["weightUnit"] = "kg"
     settings["restSeconds"] = clamp_rest_seconds(settings.get("restSeconds"))
+    settings["defaultIncrementKg"] = default_increment_kg({"settings": settings})
     settings["progressionSessions"] = 1 if _num(settings.get("progressionSessions")) == 1 else 2
     st["settings"] = settings
 
@@ -1376,8 +1400,9 @@ def rename_exercise(state, old, new):
         state.setdefault("incrementOverrides", {})[new] = cat
     # Kullanicinin makineye gore sectigi artis adimi da yeni ada tasinir.
     steps = state.setdefault("incrementSteps", {})
-    if old in steps and new not in steps:
-        steps[new] = steps[old]
+    if old in steps:
+        moved = steps.pop(old)           # tasi: eski ad kayitta artik kalmasin
+        steps.setdefault(new, moved)
     # Hazir bir hareketin eski adi secicide kalmasin.
     hidden = state.setdefault("hiddenDefaults", [])
     if old in DEFAULT_EXERCISES and old not in hidden:
@@ -1579,3 +1604,11 @@ def weekly_tonnage_trend(state, weeks=8, now_ms_value=None):
         if wk in totals:
             totals[wk] += session_tonnage(s)
     return [{"weekStart": w, "tonnage": totals[w]} for w in week_starts]
+
+
+def set_default_increment_kg(state, step_kg):
+    """Genel varsayilan artis adimini ayarlar; gecersizse ValueError."""
+    v = _num(step_kg)
+    if v is None or not (MIN_INCREMENT_STEP_KG <= v <= MAX_INCREMENT_STEP_KG):
+        raise ValueError("gecersiz artis adimi")
+    state.setdefault("settings", {})["defaultIncrementKg"] = round(v, 4)

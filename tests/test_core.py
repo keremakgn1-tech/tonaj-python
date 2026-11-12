@@ -957,10 +957,14 @@ def test_finish_session_without_working_sets_is_not_saved():
 
 
 def test_rename_keeps_increment_category_and_hides_renamed_default():
-    st = _state_with_exercise("Barbell Curl")           # hazir, izolasyon (1.25)
+    st = _state_with_exercise("Barbell Curl")           # hazir hareket
     ok, _ = core.rename_exercise(st, "Barbell Curl", "Benim Curl")
     assert ok
-    assert core.increment_for("Benim Curl", st) == 1.25
+    assert core.increment_for("Benim Curl", st) == 2.5   # genel varsayilan adim
+    # vucut agirligi kategorisi yeniden adlandirmada korunur (tekrar artirilir, adim 0)
+    st2 = _state_with_exercise("Ab Wheel Rollout")
+    assert core.rename_exercise(st2, "Ab Wheel Rollout", "Benim Ab Wheel")[0]
+    assert core.increment_for("Benim Ab Wheel", st2) == 0
     assert "Barbell Curl" not in core.all_exercise_names(st)
     assert core.rename_exercise(st, "Benim Curl", "Barbell Curl")[0]   # geri donunce tekrar gorunur
     assert "Barbell Curl" in core.all_exercise_names(st)
@@ -1092,6 +1096,7 @@ def test_custom_increment_step_used_and_carried_on_rename():
     assert core.suggested_weight_for(st, "Leg Press", 8, 12, 3)["weight"] == 65
     ok, _ = core.rename_exercise(st, "Leg Press", "Hack Squat")
     assert ok and core.increment_for("Hack Squat", st) == 5
+    assert "Leg Press" not in st["incrementSteps"], "eski ad kayitta kalmamali"
     core.set_increment_step(st, "Hack Squat", None)
     assert core.increment_for("Hack Squat", st) == 2.5
     for bad in (0, -1, 999, "x"):
@@ -1129,3 +1134,47 @@ def test_start_session_stores_suggestion_info_with_target_sets():
     ex = sess["exercises"][0]
     assert ex["suggestReason"] == "ceiling-wait" and ex["suggestedWeight"] == 100
     assert ex["suggestInfo"]["streak"] == 1 and ex["suggestInfo"]["need"] == 2 and ex["suggestInfo"]["sets_target"] == 3
+
+
+def test_global_default_increment_used_for_all_non_bodyweight_exercises():
+    st = core.default_state()
+    assert core.increment_for("Barbell Curl", st) == 2.5      # eskiden izolasyon 1.25'ti
+    assert core.increment_for("Squat", st) == 2.5
+    assert core.increment_for("Ab Wheel Rollout", st) == 0   # vucut agirligi etkilenmez
+    core.set_default_increment_kg(st, 5)
+    assert core.increment_for("Barbell Curl", st) == 5
+    assert core.increment_for("Ab Wheel Rollout", st) == 0
+    core.set_increment_step(st, "Barbell Curl", 3.75)         # hareket ozeli onceliklidir
+    assert core.increment_for("Barbell Curl", st) == 3.75
+    assert core.increment_for("Squat", st) == 5
+
+
+def test_free_increment_values_accepted_and_invalid_rejected():
+    st = core.default_state()
+    for good in (0.25, 3.75, 7.5, 12.5, 50):
+        core.set_increment_step(st, "Squat", good)
+        assert core.increment_for("Squat", st) == good
+        core.set_default_increment_kg(st, good)
+    for bad in (0, 0.1, -2, 51, None, "x"):
+        for fn in (lambda v: core.set_increment_step(st, "Squat", v) if v is not None else (_ for _ in ()).throw(ValueError()),
+                   lambda v: core.set_default_increment_kg(st, v)):
+            try:
+                fn(bad)
+                assert False, bad
+            except ValueError:
+                pass
+
+
+def test_default_increment_repaired_by_sanitize():
+    assert core.sanitize_state({})["settings"]["defaultIncrementKg"] == 2.5
+    assert core.sanitize_state({"settings": {"defaultIncrementKg": "x"}})["settings"]["defaultIncrementKg"] == 2.5
+    assert core.sanitize_state({"settings": {"defaultIncrementKg": 999}})["settings"]["defaultIncrementKg"] == 2.5
+    assert core.sanitize_state({"settings": {"defaultIncrementKg": 3.75}})["settings"]["defaultIncrementKg"] == 3.75
+
+
+def test_suggestion_uses_global_default_step():
+    st = core.default_state()
+    core.set_default_increment_kg(st, 5)
+    st["history"] = _hist("Cable Fly", [[(20, 12)] * 3, [(20, 12)] * 3])
+    r = core.suggested_weight_for(st, "Cable Fly", 8, 12, 3)
+    assert r["reason"] == "ceiling" and r["weight"] == 25 and r["step"] == 5

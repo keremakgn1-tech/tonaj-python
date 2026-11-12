@@ -506,6 +506,13 @@ def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
     row.add_widget(val_lbl)
     row.add_widget(plus)
     box.add_widget(row)
+
+    def set_value(v):
+        """Degeri koddan ayarlar (ornegin 'Varsayilan' dugmesi)."""
+        box.value = float(v) if v is not None else None
+        refresh()
+
+    box.set_value = set_value
     return box
 
 
@@ -812,49 +819,57 @@ def toast(app, msg):
     app.root_widget.show_toast(msg)
 
 
-def increment_step_options():
-    """Artis adimi secenekleri: [(etiket, kg degeri ya da None=varsayilan)].
-    kg modunda 1.25/2.5/5/10 kg, lb modunda 2.5/5/10/20 lb (depoya kg yazilir)."""
-    opts = [("Varsayılan", None)]
+def _step_display_params():
+    """Artis adimi sayaci icin gosterim birimindeki (min, max, adim)."""
     if weight_unit() == "lb":
-        for lb in (2.5, 5, 10, 20):
-            opts.append((f"{lb:g} lb", round(lb * KG_PER_LB, 4)))
-    else:
-        for kg in (1.25, 2.5, 5, 10):
-            opts.append((f"{kg:g} kg", float(kg)))
-    return opts
+        return 0.5, 110.0, 0.5
+    return core.MIN_INCREMENT_STEP_KG, core.MAX_INCREMENT_STEP_KG, 0.25
+
+
+class IncrementChooser(BoxLayout):
+    """Hareket icin artis adimini SERBEST (+/- sayaci) sectiren bilesen.
+
+    .value -> secili adim (kg) ya da None (= genel varsayilan adim kullan).
+    Depoya yazilacak kg degeri, kullanici sayaci degistirmediyse BIREBIR
+    korunur (lb yuvarlamasi kayitli degeri sessizce oynatmasin)."""
+
+    def __init__(self, state, name, **kw):
+        super().__init__(orientation="vertical", size_hint_y=None, spacing=dp(4), **kw)
+        mn, mx, step = _step_display_params()
+        self._custom = core.custom_increment_step(name, state)
+        default_kg = core.default_increment_kg(state)
+        self._default_disp = round_display_weight(to_display_weight(default_kg))
+        start_kg = self._custom if self._custom is not None else default_kg
+        self._initial = round_display_weight(to_display_weight(start_kg))
+        self._stepper = make_stepper(
+            f"Artış adımı (makineye göre) · {weight_unit()}", self._initial,
+            step=step, decimals=True, min_val=mn, max_val=mx)
+        self._reset = False
+        reset = styled_button(f"Varsayılan ({self._default_disp:g})", color=RAISED, text_color=TEXT,
+                              height=dp(34), font_size=sp_(12))
+        reset.bind(on_release=self._on_reset)
+        self.add_widget(self._stepper)
+        self.add_widget(reset)
+        self.height = self._stepper.height + dp(34) + dp(4)
+
+    def _on_reset(self, *_):
+        self._stepper.set_value(self._default_disp)
+        self._reset = True
+
+    @property
+    def value(self):
+        cur = self._stepper.value
+        if cur is None:
+            return None
+        if self._reset and cur == self._default_disp:
+            return None
+        if cur == self._initial:
+            return self._custom          # degismedi: eski kesin deger (ya da None)
+        return to_storage_kg(cur)
 
 
 def make_increment_chooser(state, name):
-    """Hareketin agirlik artis adimini (makineye gore) secen buton satiri.
-    Donen widget'in .value ozelligi secili kg degeri (None = varsayilan);
-    kaydetme isini cagiran yapar (core.set_increment_step)."""
-    current = (state.get("incrementSteps") or {}).get(name)
-    box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(16) + dp(40) + dp(3), spacing=dp(3))
-    box.value = current if current else None
-    box.add_widget(label("Artış adımı (makineye göre)", size=12, color=MUTED, height=dp(16)))
-    row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(4))
-    buttons = []
-
-    def paint():
-        for b, v in buttons:
-            sel = (v is None and box.value is None) or (
-                v is not None and box.value is not None and abs(v - box.value) < 0.01)
-            b.background_color = ACCENT if sel else RAISED
-            b.color = ACCENT_DARK if sel else TEXT
-
-    def pick(v):
-        box.value = v
-        paint()
-
-    for text, v in increment_step_options():
-        b = styled_button(text, color=RAISED, text_color=TEXT, height=dp(40), font_size=sp_(12))
-        b.bind(on_release=lambda *_a, v=v: pick(v))
-        buttons.append((b, v))
-        row.add_widget(b)
-    box.add_widget(row)
-    paint()
-    return box
+    return IncrementChooser(state, name)
 
 
 def fmt_clock(seconds):

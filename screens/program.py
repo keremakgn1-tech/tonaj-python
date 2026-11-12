@@ -50,14 +50,15 @@ def _kg_step_text(kg):
 
 
 def _form_weight_step(state, name):
-    """Set formundaki agirlik +/- adimi: hareket icin makineye gore ozel adim
-    secilmisse o (gosterim biriminde), yoksa eski varsayilan (2.5 kg / 5 lb)."""
-    default = 2.5 if weight_unit() == "kg" else 5
-    custom = core.custom_increment_step(name, state)
-    if custom is None:
-        return default
-    v = round_display_weight(to_display_weight(custom))
-    return v if v and v > 0 else default
+    """Set formundaki agirlik +/- adimi: hareketin artis adimi (hareket icin
+    ozel adim ya da genel varsayilan), gosterim biriminde. Vucut agirligi
+    hareketlerinde (adim 0) eski varsayilan: 2.5 kg / 5 lb."""
+    fallback = 2.5 if weight_unit() == "kg" else 5
+    inc = core.increment_for(name, state)
+    if not inc or inc <= 0:
+        return fallback
+    v = round_display_weight(to_display_weight(inc))
+    return v if v and v > 0 else fallback
 
 
 def suggest_text(ex):

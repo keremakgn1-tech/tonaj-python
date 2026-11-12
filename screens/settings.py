@@ -28,6 +28,7 @@ from shared import (
     RAISED, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER,
     weight_unit, font_scale, FONT_SCALE_CHOICES,
     confirm_dialog, styled_button, label, toast, dp,
+    make_stepper, round_display_weight, to_display_weight, to_storage_kg,
 )
 
 
@@ -121,6 +122,39 @@ class SettingsScreen(Screen):
         col.add_widget(label(
             "Artış önerisi için tüm hedef setleri tavan tekrarda tamamlamanın "
             "kaç antrenman üst üste gerektiği. 2 daha kontrollüdür.",
+            color=FAINT, size=13, height=dp(56)))
+
+        # Genel varsayilan artis adimi: hareket icin ozel adim secilmediyse
+        # tum hareketler (vucut agirligi haric) bunu kullanir.
+        default_kg = core.default_increment_kg(app.state)
+        unit = weight_unit()
+        initial = round_display_weight(to_display_weight(default_kg))
+        mn, mx, st_ = (0.5, 110.0, 0.5) if unit == "lb" else (core.MIN_INCREMENT_STEP_KG, core.MAX_INCREMENT_STEP_KG, 0.25)
+        step_in = make_stepper(f"Varsayılan artış adımı ({unit})", initial, step=st_,
+                               decimals=True, min_val=mn, max_val=mx)
+        col.add_widget(step_in)
+
+        def save_default_step(*_):
+            v = step_in.value
+            if v is None:
+                toast(app, "Geçerli değer gir")
+                return
+            kg = default_kg if v == initial else to_storage_kg(v)
+            try:
+                core.set_default_increment_kg(app.state, kg)
+            except ValueError:
+                toast(app, "Geçerli değer gir")
+                return
+            app.save()
+            toast(app, "Varsayılan artış adımı kaydedildi")
+            self.render()
+
+        save_step_btn = styled_button("Adımı Kaydet", color=RAISED, text_color=TEXT)
+        save_step_btn.bind(on_release=save_default_step)
+        col.add_widget(save_step_btn)
+        col.add_widget(label(
+            "Hareketi düzenleyerek ya da Hedef penceresinden her hareket için ayrı "
+            "adım verebilirsin. Vücut ağırlığı hareketlerinde tekrar artırılır.",
             color=FAINT, size=13, height=dp(56)))
 
         # ---- Yedekleme ----

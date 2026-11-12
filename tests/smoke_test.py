@@ -548,9 +548,9 @@ def step_use_steppers_in_target_editor_and_save():
     assert popup is not None, "Hedef popup not found"
     plus_buttons = find_all_text(popup, "+")
     minus_buttons = [w for w in popup.walk() if hasattr(w, "text") and w.text in ("−", "-")]
-    # Set, tekrar min, tekrar max, agirlik, dinlenme (RIR kaldirildi)
-    assert len(plus_buttons) == 5, f"expected 5 plus buttons, got {len(plus_buttons)}"
-    assert len(minus_buttons) == 5, f"expected 5 minus buttons, got {len(minus_buttons)}"
+    # Set, tekrar min, tekrar max, agirlik, artis adimi, dinlenme (RIR kaldirildi)
+    assert len(plus_buttons) == 6, f"expected 6 plus buttons, got {len(plus_buttons)}"
+    assert len(minus_buttons) == 6, f"expected 6 minus buttons, got {len(minus_buttons)}"
     for b in plus_buttons:
         click(b); click(b)
     b = plus_buttons[0]
@@ -1718,6 +1718,18 @@ def step_progress_badge_shows_done_over_target():
 safe("active session: progress badge shows done/target", step_progress_badge_shows_done_over_target)
 
 
+def _chooser(popup):
+    from shared import IncrementChooser
+    found = [w for w in popup.walk() if isinstance(w, IncrementChooser)]
+    assert found, "artis adimi secici bulunamadi"
+    return found[0]
+
+
+def _chooser_press(chooser, sign, times):
+    for _ in range(times):
+        click(find_all_text(chooser, sign)[0])
+
+
 def _hist_session(name, sets, started_at, sid, day_id=None):
     return {"id": sid, "startedAt": started_at, "dayId": day_id, "dayName": None, "isDeload": False,
             "note": "", "exercises": [{"name": name, "sets": [{"weight": w, "reps": r} for w, r in sets]}]}
@@ -1766,8 +1778,11 @@ def step_increment_step_chooser_in_hedef_popup_changes_form_step_and_suggestion(
     program_screen.open_target_editor(day, "Leg Press")
     popup = top_popup("Hedef")
     assert popup is not None
-    assert find_text(popup, "Artış adımı (makineye göre)") is not None
-    click(find_text(popup, "5 KG"))
+    assert find_text(popup, "Artış adımı (makineye göre)", exact=False) is not None
+    chooser = _chooser(popup)
+    assert chooser.value is None, "dokunulmadan varsayilan (None) kalmali"
+    _chooser_press(chooser, "+", 10)          # 2.5 -> 5.0 (0.25'lik adimlarla)
+    assert chooser.value == 5.0, chooser.value
     click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
     assert app.state["incrementSteps"].get("Leg Press") == 5.0, app.state["incrementSteps"]
 
@@ -1786,7 +1801,10 @@ def step_increment_step_chooser_in_hedef_popup_changes_form_step_and_suggestion(
     app.state["activeSession"] = None
     program_screen.open_target_editor(day, "Leg Press")
     popup = top_popup("Hedef")
-    click(find_text(popup, "VARSAYILAN"))
+    chooser = _chooser(popup)
+    assert chooser.value == 5.0, "kayitli adim acilista gorunmeli"
+    click(find_text(popup, "VARSAYILAN", exact=False))
+    assert chooser.value is None
     click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
     assert "Leg Press" not in app.state["incrementSteps"]
     app.state["history"] = []
@@ -1802,19 +1820,24 @@ def step_library_popup_saves_step_and_rename_carries_it():
     library_screen.open_rename("Machine Row")
     popup = top_popup("Hareketi Düzenle")
     assert popup is not None
-    click(find_text(popup, "5 KG"))
+    chooser = _chooser(popup)
+    _chooser_press(chooser, "+", 5)           # 2.5 -> 3.75 (serbest deger)
+    assert chooser.value == 3.75, chooser.value
     click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
-    assert app.state["incrementSteps"].get("Machine Row") == 5.0
+    assert app.state["incrementSteps"].get("Machine Row") == 3.75
 
     library_screen.open_rename("Machine Row")
     popup = top_popup("Hareketi Düzenle")
     from kivy.uix.textinput import TextInput as _TI2
     ti = [w for w in popup.walk() if isinstance(w, _TI2)][0]
     ti.text = "Seated Machine Row"
-    click(find_text(popup, "10 KG"))
+    chooser = _chooser(popup)
+    assert chooser.value == 3.75, "kayitli ozel adim popup'ta gorunmeli"
+    _chooser_press(chooser, "+", 15)          # 3.75 -> 7.5
     click(find_text(popup, "KAYDET", exact=False) or find_text(popup, "Kaydet"))
     assert app.state["history"][0]["exercises"][0]["name"] == "Seated Machine Row"
-    assert app.state["incrementSteps"].get("Seated Machine Row") == 10.0
+    assert app.state["incrementSteps"].get("Seated Machine Row") == 7.5
+    assert "Machine Row" not in app.state["incrementSteps"]
     app.state["history"] = []
     app.state["incrementSteps"] = {}
 
@@ -1831,6 +1854,26 @@ def step_settings_progression_sessions_toggle():
     assert app.state["settings"]["progressionSessions"] == 2
 
 safe("settings: progression sessions toggle (1 / 2)", step_settings_progression_sessions_toggle)
+
+
+def step_settings_default_increment_step_saves_and_applies():
+    app.state["settings"]["defaultIncrementKg"] = 2.5
+    app.state["incrementSteps"] = {}
+    go("settings"); settings_screen.render()
+    assert find_text(settings_screen, "Varsayılan artış adımı (kg)") is not None
+    plus = [b for b in find_all_text(settings_screen, "+")]
+    # ayarlar ekraninda tek sayac var (birim/yazi tipi vb. dugmedir)
+    assert len(plus) == 1, len(plus)
+    for _ in range(10):
+        click(plus[0])                     # 2.5 -> 5.0
+    click(find_text(settings_screen, "ADIMI KAYDET", exact=False) or find_text(settings_screen, "Adımı Kaydet"))
+    assert app.state["settings"]["defaultIncrementKg"] == 5.0
+    assert core.increment_for("Barbell Curl", app.state) == 5.0
+    assert core.increment_for("Ab Wheel Rollout", app.state) == 0
+    # sifirla
+    app.state["settings"]["defaultIncrementKg"] = 2.5
+
+safe("settings: default increment step saved and applied", step_settings_default_increment_step_saves_and_applies)
 
 
 print()
