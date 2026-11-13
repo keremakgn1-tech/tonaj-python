@@ -1876,6 +1876,111 @@ def step_settings_default_increment_step_saves_and_applies():
 safe("settings: default increment step saved and applied", step_settings_default_increment_step_saves_and_applies)
 
 
+def _exercise_card_widget(screen, name):
+    from shared import Card
+    w = find_text(screen, name)
+    while w is not None and not isinstance(w, Card):
+        w = w.parent
+    assert w is not None, f"{name} karti bulunamadi"
+    return w
+
+
+def step_exercise_card_shows_progress_state():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    app.state["history"] = []
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Squat", target_sets=2,
+                                 target_reps_min=8, target_reps_max=12)
+    core.start_session(app.state, day["id"])
+    go("program"); program_screen.render()
+    card = _exercise_card_widget(program_screen, "Squat")
+    assert card.opacity == 1
+    assert not card.canvas.after.children, "siradaki (set girilmemis) kartta ek cizim olmamali"
+
+    def add(wt, rp):
+        w, r = _card_steppers(program_screen)[:2]
+        w.value, r.value = wt, rp
+        click(find_text(program_screen, "+ SETİ EKLE"))
+
+    add(60.0, 8)                       # 1/2: uzerinde calisiliyor -> belirgin kenarlik
+    card = _exercise_card_widget(program_screen, "Squat")
+    assert card.opacity == 1
+    n_active = len(card.canvas.after.children)
+    assert n_active > 0, "calisilan kartta kenarlik cizilmeli"
+    add(60.0, 8)                       # 2/2: tamam -> soluk + sol vurgu cizgisi
+    card = _exercise_card_widget(program_screen, "Squat")
+    assert abs(card.opacity - 0.78) < 0.001, card.opacity
+    assert len(card.canvas.after.children) > 0
+    # tekrar tekrar rebuild cizimi/baglantiyi sisirmez
+    counts = set()
+    for _ in range(5):
+        program_screen.stop_rest()
+        _x_buttons(program_screen)[::-1][0].dispatch("on_release")       # son seti sil (geri al listesi)
+        click(find_text(program_screen, "GERİ AL"))
+        card = _exercise_card_widget(program_screen, "Squat")
+        counts.add(len(card.canvas.after.children))
+    assert len(counts) == 1, f"her rebuild'de cizim birikiyor: {counts}"
+    # set silinince tamamdan calisilana doner
+    _x_buttons(program_screen)[::-1][0].dispatch("on_release")
+    card = _exercise_card_widget(program_screen, "Squat")
+    assert card.opacity == 1, "tamam durumu set silinince kalkmali"
+    program_screen.stop_rest(refresh=False)
+    app.state["activeSession"] = None
+
+safe("active session: exercise card shows pending / active / done state",
+     step_exercise_card_shows_progress_state)
+
+
+def step_theme_keeps_accent_for_actions_only():
+    import shared as sh
+    # secili durum sakin gri, vurgu rengi degil
+    app.state["settings"]["weightUnit"] = "kg"
+    go("settings"); settings_screen.render()
+    kg = find_text(settings_screen, "KG")
+    lb = find_text(settings_screen, "LB")
+    kg_btn = kg if hasattr(kg, "background_color") else kg.parent
+    lb_btn = lb if hasattr(lb, "background_color") else lb.parent
+    assert tuple(kg_btn.background_color) == tuple(sh.SELECTED), kg_btn.background_color
+    assert tuple(lb_btn.background_color) == tuple(sh.RAISED)
+    assert tuple(kg_btn.background_color) != tuple(sh.ACCENT)
+    # alt gezinme: aktif sekme vurgu renginde degil
+    root = app.root_widget
+    for name, (ind, lbl) in root._nav_tabs.items():
+        if root.sm.current == name:
+            assert tuple(lbl.color) == tuple(sh.TEXT), "aktif sekme sakin renkte olmali"
+            assert tuple(ind.rgba) != tuple(sh.ACCENT)
+
+safe("theme: selected states are calm (not accent)", step_theme_keeps_accent_for_actions_only)
+
+
+def step_suggestion_line_highlights_only_when_it_is_time_to_increase():
+    import shared as sh
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    day = core.add_program_day(app.state)
+    core.set_day_exercise_target(app.state, day["id"], "Leg Press", target_sets=3,
+                                 target_reps_min=8, target_reps_max=12)
+    app.state["history"] = [_hist_session("Leg Press", [(100, 12)] * 3, 1000, "h1", day["id"])]
+    core.start_session(app.state, day["id"])
+    go("program"); program_screen.render()
+    etiket = find_text(program_screen, "ÖNERİ")
+    assert tuple(etiket.color) == tuple(sh.STEEL), "bekleme durumunda etiket mavi kalmali"
+    app.state["activeSession"] = None
+    app.state["history"].insert(0, _hist_session("Leg Press", [(100, 12)] * 3, 2000, "h2", day["id"]))
+    core.start_session(app.state, day["id"])
+    program_screen.render()
+    etiket = find_text(program_screen, "ÖNERİ")
+    assert tuple(etiket.color) == tuple(sh.ACCENT), "artis zamaninda etiket vurgu renginde olmali"
+    line = find_text(program_screen, "artış zamanı", exact=False)
+    assert tuple(line.color) == tuple(sh.ACCENT)
+    app.state["activeSession"] = None
+    app.state["history"] = []
+
+safe("suggestion line: accent only when it is time to increase",
+     step_suggestion_line_highlights_only_when_it_is_time_to_increase)
+
+
 print()
 print("=" * 60)
 if errors:

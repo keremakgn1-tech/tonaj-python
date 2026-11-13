@@ -87,6 +87,11 @@ STEEL = (0x5B/255, 0x7F/255, 0xB5/255, 1)
 # yerlerini tek tek bulup degistirmek gerekirdi, biri unutulursa tutarsizlik
 # olusurdu. Isimli sabitlere tasindi.
 TRANSPARENT = (0, 0, 0, 0)
+# Secili durum (secili birim/sekme/ayar dugmesi): vurgu rengi SADECE "simdi bunu yap"
+# eylemleri (Set Ekle, Kaydet, Bitir), PR ve "artis zamani" icin; secili durumlar
+# sakin, acik gri bir dolguyla gosterilir.
+SELECTED = (0x5C/255, 0x62/255, 0x6E/255, 1)
+ACTION_QUIET = DIVIDER   # ikincil eylem dugmesi (dinlenme BASLAT/ATLA, GERI AL) dolgusu
 ACCENT_TEXT = (0.07, 0.08, 0.06, 1)  # ACCENT (limon yeşili) zemin üzerindeki koyu metin rengi - styled_button() varsayılanı
 
 # KOK NEDEN (Task 19 - kod incelemesinde bulundu - "tutarsiz ikon-buton dp()

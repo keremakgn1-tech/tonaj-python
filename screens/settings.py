@@ -25,7 +25,7 @@ from kivy.utils import platform
 
 import core
 from shared import (
-    RAISED, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER,
+    RAISED, TEXT, MUTED, FAINT, SELECTED, DANGER,
     weight_unit, font_scale, FONT_SCALE_CHOICES,
     confirm_dialog, styled_button, label, toast, dp,
     make_stepper, round_display_weight, to_display_weight, to_storage_kg,
@@ -62,10 +62,10 @@ class SettingsScreen(Screen):
             self.render()
 
         unit_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
-        kg_btn = styled_button("KG", color=ACCENT if cur_unit == "kg" else RAISED,
-                                text_color=ACCENT_DARK if cur_unit == "kg" else TEXT)
-        lb_btn = styled_button("LB", color=ACCENT if cur_unit == "lb" else RAISED,
-                                text_color=ACCENT_DARK if cur_unit == "lb" else TEXT)
+        kg_btn = styled_button("KG", color=SELECTED if cur_unit == "kg" else RAISED,
+                                text_color=TEXT)
+        lb_btn = styled_button("LB", color=SELECTED if cur_unit == "lb" else RAISED,
+                                text_color=TEXT)
         kg_btn.bind(on_release=lambda *_: set_unit("kg"))
         lb_btn.bind(on_release=lambda *_: set_unit("lb"))
         unit_row.add_widget(kg_btn); unit_row.add_widget(lb_btn)
@@ -92,8 +92,8 @@ class SettingsScreen(Screen):
         scale_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         for name, val in FONT_SCALE_CHOICES:
             is_cur = abs(val - cur_scale) < 0.001
-            btn = styled_button(name, color=ACCENT if is_cur else RAISED,
-                                 text_color=ACCENT_DARK if is_cur else TEXT)
+            btn = styled_button(name, color=SELECTED if is_cur else RAISED,
+                                 text_color=TEXT)
             btn.bind(on_release=lambda *_, v=val: set_font_scale(v))
             scale_row.add_widget(btn)
         col.add_widget(scale_row)
@@ -114,8 +114,8 @@ class SettingsScreen(Screen):
         need_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         for n, text in ((1, "1 ANTRENMAN"), (2, "2 ANTRENMAN")):
             sel = cur_need == n
-            btn = styled_button(text, color=ACCENT if sel else RAISED,
-                                 text_color=ACCENT_DARK if sel else TEXT)
+            btn = styled_button(text, color=SELECTED if sel else RAISED,
+                                 text_color=TEXT)
             btn.bind(on_release=lambda *_, n=n: set_need(n))
             need_row.add_widget(btn)
         col.add_widget(need_row)

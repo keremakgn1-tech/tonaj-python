@@ -28,7 +28,7 @@ from kivy.clock import Clock
 from kivy.base import ExceptionHandler, ExceptionManager
 
 import core
-from shared import BG, CARD, BORDER, MUTED, ACCENT, ACCENT_TEXT, bg_rect, sp_, ClickableRow, toast
+from shared import BG, CARD, BORDER, MUTED, TEXT, ACCENT, ACCENT_TEXT, bg_rect, sp_, ClickableRow, toast
 from screens.program import ProgramScreen
 from screens.history import HistoryScreen
 from screens.library import LibraryScreen
@@ -169,8 +169,8 @@ class RootWidget(FloatLayout):
     def _refresh_nav(self, *_):
         for name, (ind_col, lbl) in self._nav_tabs.items():
             active = (self.sm.current == name)
-            ind_col.rgba = ACCENT if active else BG
-            lbl.color = ACCENT if active else MUTED
+            ind_col.rgba = TEXT if active else BG
+            lbl.color = TEXT if active else MUTED
 
     def show_toast(self, msg):
         # KOK NEDEN (kod incelemesinde bulundu - "toast bildirimleri

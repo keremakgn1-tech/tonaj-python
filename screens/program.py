@@ -26,7 +26,7 @@ from kivy.uix.recycleboxlayout import RecycleBoxLayout
 
 import core
 from shared import (
-    RAISED, BORDER, DIVIDER, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER, STEEL,
+    RAISED, BORDER, DIVIDER, TEXT, MUTED, FAINT, ACCENT_DARK, ACCENT, DANGER, STEEL, SELECTED, ACTION_QUIET,
     TRANSPARENT, ICON_BTN_SIZE,
     weight_unit, to_display_weight, to_storage_kg, fmt_weight,
     bg_rect, fit_popup_to_content, confirm_dialog, Card, styled_button, label, sp_,
@@ -42,6 +42,46 @@ SUGGEST_TEXT = {
     "below": "aynı ağırlık — geçen sefer bazı setler hedefin altında kaldı",
     "inrange": "aynı ağırlık — bu sefer aralığın tavanına ulaşmaya çalış",
 }
+
+
+def card_status(ex):
+    """Hareket kartinin durumu: "done" (hedef set sayisi tamam), "active" (en az
+    bir calisma seti var, hedef bitmedi) ya da "pending" (henuz calisma seti yok)."""
+    working = [s for s in ex["sets"] if not s.get("isWarmup")]
+    tsets = ex.get("targetSets")
+    if tsets and len(working) >= tsets:
+        return "done"
+    return "active" if working else "pending"
+
+
+def apply_card_status(card, status):
+    """Karti duruma gore cizer: tamamlanan hareket sol kenarda vurgu cizgisi + biraz
+    soluk, uzerinde calisilan hareket belirgin kenarlikli, siradaki normal.
+    Sadece cizim: veriye/mantiga dokunmaz. Her rebuild'de yeniden cagrilabilir
+    (eski cizim ve baglanti temizlenir)."""
+    old = getattr(card, "_status_draw", None)
+    if old is not None:
+        card.unbind(pos=old, size=old)
+        card._status_draw = None
+    card.canvas.after.remove_group("status")
+    card.opacity = 0.78 if status == "done" else 1
+    if status == "pending":
+        return
+
+    def draw(*_):
+        card.canvas.after.remove_group("status")
+        with card.canvas.after:
+            if status == "done":
+                Color(*ACCENT, group="status")
+                Rectangle(pos=(card.x, card.y + dp(6)), size=(dp(4), max(0, card.height - dp(12))), group="status")
+            else:
+                Color(TEXT[0], TEXT[1], TEXT[2], 0.55, group="status")
+                Line(rounded_rectangle=(card.x, card.y, card.width, card.height, dp(8)),
+                     width=dp(1.3), group="status")
+
+    card._status_draw = draw
+    card.bind(pos=draw, size=draw)
+    draw()
 
 
 def _kg_step_text(kg):
@@ -133,8 +173,8 @@ class ProgramScreen(Screen):
         top_row.add_widget(label("PROGRAM", size=14, bold=True, color=MUTED, height=dp(40)))
         top_row.add_widget(BoxLayout())
         edit_btn = styled_button("Bitti" if self.edit_mode else "Düzenle",
-                                  color=ACCENT if self.edit_mode else RAISED,
-                                  text_color=ACCENT_DARK if self.edit_mode else TEXT,
+                                  color=SELECTED if self.edit_mode else RAISED,
+                                  text_color=TEXT,
                                   size_hint=(None, None), size=(dp(110), dp(36)))
         def toggle_edit(*_):
             self.edit_mode = not self.edit_mode
@@ -717,7 +757,7 @@ class ProgramScreen(Screen):
         header.add_widget(title_row)
         tonnage = core.session_tonnage(sess)
         tonnage_row = BoxLayout(size_hint_y=None, height=dp(46), spacing=dp(6))
-        self._tonnage_lbl = mono_label(f"{to_display_weight(tonnage):g}", size=32, color=ACCENT, bold=True, height=dp(44))
+        self._tonnage_lbl = mono_label(f"{to_display_weight(tonnage):g}", size=32, color=TEXT, bold=True, height=dp(44))
         tonnage_row.add_widget(self._tonnage_lbl)
         tonnage_row.add_widget(label(weight_unit(), size=14, color=MUTED, height=dp(44)))
         header.add_widget(tonnage_row)
@@ -828,7 +868,7 @@ class ProgramScreen(Screen):
         if mode == "running":
             left = int(r["end"] - time.time() + 0.999)
             lbl.text = f"DİNLENME  {fmt_clock(left)}"
-            lbl.color = ACCENT
+            lbl.color = TEXT
             btn.text = "ATLA"
         elif mode == "done":
             lbl.text = "SÜRE DOLDU — SIRA SENDE"
@@ -848,7 +888,7 @@ class ProgramScreen(Screen):
                               size_hint_x=None, width=dp(52), height=dp(44))
         plus = styled_button("+15", color=BORDER, text_color=TEXT,
                              size_hint_x=None, width=dp(52), height=dp(44))
-        self._rest_btn = styled_button("BAŞLAT", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1),
+        self._rest_btn = styled_button("BAŞLAT", color=ACTION_QUIET, text_color=TEXT,
                                        size_hint_x=None, width=dp(84), height=dp(44))
         minus.bind(on_release=lambda *_: self.rest_adjust(-15))
         plus.bind(on_release=lambda *_: self.rest_adjust(15))
@@ -885,7 +925,7 @@ class ProgramScreen(Screen):
                         padding=[dp(12), dp(2), dp(12), dp(2)], opacity=0, disabled=True)
         bg_rect(row, BORDER, radius=0)
         row.add_widget(mono_label("Set silindi", size=14, color=TEXT, height=dp(40)))
-        btn = styled_button("GERİ AL", color=ACCENT, text_color=(0.07, 0.08, 0.06, 1),
+        btn = styled_button("GERİ AL", color=ACTION_QUIET, text_color=TEXT,
                             size_hint_x=None, width=dp(96), height=dp(40))
         btn.bind(on_release=lambda *_: self.undo_remove_set())
         row.add_widget(btn)
@@ -1066,6 +1106,7 @@ class ProgramScreen(Screen):
 
         def rebuild(*_):
             card.clear_widgets()
+            apply_card_status(card, card_status(ex))
             working = [s for s in ex["sets"] if not s.get("isWarmup")]
             head = BoxLayout(size_hint_y=None, height=dp(32))
             head.add_widget(label(ex["name"], size=16, bold=True))
@@ -1088,14 +1129,18 @@ class ProgramScreen(Screen):
             tgt = target_label(ex)
             if tgt:
                 tgt_row = BoxLayout(size_hint_y=None, height=dp(22), spacing=dp(6))
-                tgt_row.add_widget(label("HEDEF", size=14, bold=True, color=ACCENT, size_hint_x=None, width=dp(56)))
+                tgt_row.add_widget(label("HEDEF", size=14, bold=True, color=MUTED, size_hint_x=None, width=dp(56)))
                 tgt_row.add_widget(mono_label(tgt, size=14, color=TEXT))
                 card.add_widget(tgt_row)
             if ex.get("suggestedWeight") is not None:
                 txt = f"{fmt_weight(ex['suggestedWeight'])} — {suggest_text(ex)}"
-                sug_lbl = label(txt, size=14, color=STEEL)
+                # Artis zamani gelince satir vurgu renginde (en onemli oneri gozden
+                # kacmasin); diger durumlarda okunur acik metin, sadece etiket mavi.
+                go_up = ex.get("suggestReason") == "ceiling"
+                sug_lbl = label(txt, size=14, color=ACCENT if go_up else TEXT)
                 sug_row = BoxLayout(size_hint_y=None, height=dp(30), spacing=dp(6))
-                sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=STEEL, size_hint_x=None, width=dp(56)))
+                sug_row.add_widget(label("ÖNERİ", size=14, bold=True, color=ACCENT if go_up else STEEL,
+                                         size_hint_x=None, width=dp(56)))
                 sug_row.add_widget(sug_lbl)
                 # Gerekce uzun olabilir: satir, metnin yuksekligine gore buyur (kirpilmaz).
                 sug_lbl.bind(height=lambda _w, h: setattr(sug_row, "height", max(dp(30), h)))

@@ -12,7 +12,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.metrics import dp
 
 import core
-from shared import MUTED, ACCENT, DANGER, weight_unit, to_display_weight, Card, label, mono_label, WeeklyBarChart
+from shared import MUTED, TEXT, ACCENT, DANGER, weight_unit, to_display_weight, Card, label, mono_label, WeeklyBarChart
 
 
 class ReportScreen(Screen):
@@ -39,7 +39,7 @@ class ReportScreen(Screen):
         stats = Card(size_hint_y=None, height=dp(84), orientation="horizontal", spacing=dp(4))
         def stat_cell(value, unit_label):
             cell = BoxLayout(orientation="vertical")
-            cell.add_widget(mono_label(value, size=22, color=ACCENT, bold=True, halign="center", height=dp(32)))
+            cell.add_widget(mono_label(value, size=22, color=TEXT, bold=True, halign="center", height=dp(32)))
             cell.add_widget(label(unit_label, size=14, color=MUTED, halign="center", height=dp(18)))
             return cell
         stats.add_widget(stat_cell(f"{to_display_weight(tonnage):g}", f"{weight_unit()} bu hafta"))
