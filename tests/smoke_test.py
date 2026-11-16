@@ -1981,6 +1981,25 @@ safe("suggestion line: accent only when it is time to increase",
      step_suggestion_line_highlights_only_when_it_is_time_to_increase)
 
 
+def step_ad_hoc_exercise_shows_increase_suggestion():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    app.state["history"] = [_hist_session("Leg Press", [(100, 12)] * 3, 1000, "a1"),
+                            _hist_session("Leg Press", [(100, 12)] * 3, 2000, "a2")]
+    core.start_session(app.state)                 # serbest antrenman
+    core.add_exercise_to_session(app.state, "Leg Press")
+    go("program"); program_screen.render()
+    assert find_text(program_screen, "artış zamanı", exact=False) is not None, "ad-hoc harekette artis onerisi yok"
+    assert find_text(program_screen, "102.5", exact=False) is not None
+    assert find_text(program_screen, "varsayıldı", exact=False) is not None, "varsayilan aralik belirtilmeli"
+    w = _card_steppers(program_screen)[0]
+    assert w.value == 102.5, f"form oneriyle acilmali: {w.value}"
+    app.state["activeSession"] = None
+    app.state["history"] = []
+
+safe("ad-hoc exercise (not in program) shows increase suggestion", step_ad_hoc_exercise_shows_increase_suggestion)
+
+
 print()
 print("=" * 60)
 if errors:

@@ -116,10 +116,13 @@ def suggest_text(ex):
         txt = (f"tavandasın ({streak}/{need} antrenman) · artış için tavana "
                f"{need - streak} antrenman daha ulaş")
     elif reason == "incomplete":
-        txt = (f"tavan tamam ama {info.get('sets_done', 0)}/{info.get('sets_target')} set "
-               "yapılmış · önce hedef setleri tamamla")
+        txt = (f"tavan tamam ama aynı ağırlıkta {info.get('sets_done', 0)}/{info.get('sets_target')} set "
+               "yapılmış · hedef setleri aynı ağırlıkla tamamla")
     else:
         txt = SUGGEST_TEXT.get(reason, "")
+    if info.get("default_range"):
+        txt += (f" · tekrar aralığı girilmediği için {core.DEFAULT_REP_MIN}-{info.get('rep_max', core.DEFAULT_REP_MAX)} "
+                "varsayıldı (Hedef'ten ayarla)")
     if info.get("plateau"):
         txt += " · Son 4 antrenmandır ilerleme yok: deload ya da hareketi değiştirmeyi düşün"
     return txt

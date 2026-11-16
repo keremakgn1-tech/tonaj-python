@@ -1060,6 +1060,10 @@ def history_for_exercise(state, name):
 
 
 PLATEAU_SESSIONS = 4
+# Hareket icin tekrar araligi (Hedef) girilmemisse artis onerisi YINE de calissin
+# diye varsayilan aralik; oneri satiri bunu acikca belirtir.
+DEFAULT_REP_MIN = 8
+DEFAULT_REP_MAX = 12
 
 
 def _exercise_records(state, name, limit=PLATEAU_SESSIONS):
@@ -1100,6 +1104,17 @@ def suggested_weight_for(state, name, target_min, target_max, target_sets=None):
     records = _exercise_records(state, name)
     if not records:
         return None
+    # KOK NEDEN (kullanici: "agirlik arttirma zamanini soylemiyor"): tekrar araligi
+    # (Hedef) girilmemis hareketlerde tavan HIC bilinmedigi icin artis onerisi
+    # ASLA cikmiyordu ve satir yanlis sekilde "aralikta" diyordu. Artik aralik yoksa
+    # varsayilan 8-12 kullanilir ("default_range" bilgisiyle, satirda belirtilir);
+    # bu durumda "tabanin altinda" kontrolu YAPILMAZ (kullanicinin gercek araligini
+    # bilmedigimiz icin yanlis uyari vermemek icin).
+    default_range = target_min is None and target_max is None
+    if default_range:
+        target_min, target_max = DEFAULT_REP_MIN, DEFAULT_REP_MAX
+    elif target_max is None:
+        target_max = target_min
     need = 1 if _num((state.get("settings") or {}).get("progressionSessions")) == 1 else 2
 
     def ready(rec):
@@ -1110,14 +1125,16 @@ def suggested_weight_for(state, name, target_min, target_max, target_sets=None):
     latest = records[0]
     w = latest["weight"]
     info = {"sets_done": len(latest["top"]), "sets_target": target_sets,
-            "need": need, "streak": 0, "plateau": False}
+            "need": need, "streak": 0, "plateau": False,
+            "default_range": default_range, "rep_max": target_max}
 
     # Plato: ayni agirlikta 4 antrenman ve toplam tekrar hic artmadi
     if len(records) >= PLATEAU_SESSIONS and all(r["weight"] == w for r in records):
         if latest["reps"] <= max(r["reps"] for r in records[1:]):
             info["plateau"] = True
 
-    below_floor = target_min is not None and any(st["reps"] < target_min for st in latest["top"])
+    below_floor = (not default_range and target_min is not None
+                   and any(st["reps"] < target_min for st in latest["top"]))
     if below_floor:
         return {"weight": w, "reason": "below", **info}
 
@@ -1201,7 +1218,15 @@ def add_exercise_to_session(state, name):
     name = canonical_exercise_name(state, name)
     if not sess or not name or any(e["name"] == name for e in sess["exercises"]):
         return False
-    sess["exercises"].append({"name": name, "sets": []})
+    item = {"name": name, "sets": []}
+    # Programda olmayan (antrenman sirasinda eklenen) harekette de gecmise gore
+    # artis onerisi hesaplanir (hedefsiz: varsayilan tekrar araligi, set sarti yok).
+    suggestion = None if sess.get("isDeload") else suggested_weight_for(state, name, None, None, None)
+    if suggestion:
+        item["suggestedWeight"] = suggestion["weight"]
+        item["suggestReason"] = suggestion["reason"]
+        item["suggestInfo"] = {k: v for k, v in suggestion.items() if k not in ("weight", "reason")}
+    sess["exercises"].append(item)
     return True
 
 

@@ -1178,3 +1178,52 @@ def test_suggestion_uses_global_default_step():
     st["history"] = _hist("Cable Fly", [[(20, 12)] * 3, [(20, 12)] * 3])
     r = core.suggested_weight_for(st, "Cable Fly", 8, 12, 3)
     assert r["reason"] == "ceiling" and r["weight"] == 25 and r["step"] == 5
+
+
+# ---------------------------------------------------------------------------
+# "Agirlik arttirma zamanini soylemiyor" duzeltmesi: hedefsiz / programda olmayan hareket
+# ---------------------------------------------------------------------------
+def test_exercise_without_rep_range_uses_default_range_and_reaches_ceiling():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 3])
+    r = core.suggested_weight_for(st, "Leg Press", None, None, None)
+    assert r["reason"] == "ceiling" and r["weight"] == 102.5 and r["default_range"] is True
+    assert r["rep_max"] == 12
+
+
+def test_default_range_never_gives_below_floor_warning():
+    st = core.default_state()
+    st["history"] = _hist("Squat", [[(120, 5)] * 5, [(120, 5)] * 5])   # 5x5 calisan, aralik girilmemis
+    r = core.suggested_weight_for(st, "Squat", None, None, 5)
+    assert r["reason"] == "inrange" and r["weight"] == 120
+
+
+def test_only_min_target_is_treated_as_fixed_rep_target():
+    st = core.default_state()
+    st["history"] = _hist("Squat", [[(120, 5)] * 5, [(120, 5)] * 5])
+    r = core.suggested_weight_for(st, "Squat", 5, None, 5)
+    assert r["reason"] == "ceiling" and r["weight"] == 122.5 and r["default_range"] is False
+
+
+def test_ad_hoc_exercise_added_to_session_gets_suggestion_from_history():
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 3])
+    core.start_session(st)                       # serbest antrenman (program gunu yok)
+    assert core.add_exercise_to_session(st, "leg press")      # yazim farki da eslesir
+    ex = st["activeSession"]["exercises"][0]
+    assert ex["name"] == "Leg Press"
+    assert ex["suggestedWeight"] == 102.5 and ex["suggestReason"] == "ceiling"
+    assert ex["suggestInfo"]["default_range"] is True
+
+
+def test_ad_hoc_exercise_without_history_or_in_deload_has_no_suggestion():
+    st = core.default_state()
+    core.start_session(st)
+    core.add_exercise_to_session(st, "Hiç Yapılmamış Hareket")
+    assert "suggestedWeight" not in st["activeSession"]["exercises"][0]
+    st = core.default_state()
+    st["history"] = _hist("Leg Press", [[(100, 12)] * 3, [(100, 12)] * 3])
+    day = core.add_program_day(st)
+    core.start_session(st, day["id"], is_deload=True)
+    core.add_exercise_to_session(st, "Leg Press")
+    assert "suggestedWeight" not in st["activeSession"]["exercises"][0]
