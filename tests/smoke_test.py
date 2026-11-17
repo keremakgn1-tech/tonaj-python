@@ -1795,7 +1795,8 @@ def step_increment_step_chooser_in_hedef_popup_changes_form_step_and_suggestion(
     assert w.value == 65.0, f"oneri 60+5=65 olmali: {w.value}"
     plus = [b for b in find_all_text(program_screen, "+")][0]
     click(plus)
-    assert w.value == 70.0, f"sayac 5'er artmali: {w.value}"
+    # Set formundaki sayac HER hareketde sabit 0.5 kg; hareketin artis adimi sadece oneri icin
+    assert w.value == 65.5, f"form sayaci sabit 0.5 artmali: {w.value}"
 
     # varsayilana donus
     app.state["activeSession"] = None
@@ -1998,6 +1999,75 @@ def step_ad_hoc_exercise_shows_increase_suggestion():
     app.state["history"] = []
 
 safe("ad-hoc exercise (not in program) shows increase suggestion", step_ad_hoc_exercise_shows_increase_suggestion)
+
+
+def step_weight_stepper_is_always_half_kg_and_accepts_manual_entry():
+    app.state["activeSession"] = None
+    app.state["program"]["days"] = []
+    app.state["history"] = []
+    app.state["settings"]["weightUnit"] = "kg"
+    app.state["incrementSteps"] = {"Squat": 5.0, "Leg Curl": 1.25}      # oneri adimlari FARKLI olsa da
+    core.start_session(app.state)
+    for n in ("Squat", "Leg Curl"):
+        core.add_exercise_to_session(app.state, n)
+    go("program"); program_screen.render()
+    ws = [w for w in program_screen.walk() if hasattr(w, "value_tap")]
+    assert len(ws) == 2, "her hareketin agirlik sayaci dokunulabilir olmali"
+    for w in ws:
+        w.value = 40.0
+        plus = find_all_text(w, "+")[0]
+        click(plus)
+        assert w.value == 40.5, f"HER harekette +0.5 olmali: {w.value}"
+        minus = find_all_text(w, "−")[0]
+        click(minus); click(minus)
+        assert w.value == 39.5
+
+    # dokununca sayi tus takimi acilir (sistem klavyesi degil), deger yazilip onaylanir
+    w = ws[0]
+    w.value = 40.0
+    w.value_tap.dispatch("on_release")
+    pad = top_popup("Ağırlık (kg)")
+    assert pad is not None, "sayi tus takimi acilmadi"
+    assert find_text(pad, "40", exact=False) is not None, "mevcut deger gorunmeli"
+    for k in ("4", "6", ".", "2", "5"):
+        pad.number_pad_press(k)                       # ilk tus mevcut degerin yerine gecer
+    assert find_text(pad, "46.25") is not None
+    pad.number_pad_press(".")                          # ikinci nokta yok sayilir
+    pad.number_pad_press("9")                          # 3. ondalik yok sayilir
+    assert find_text(pad, "46.25") is not None
+    click(find_text(pad, "TAMAM"))
+    assert w.value == 46.25, w.value
+    assert top_popup("Ağırlık (kg)") is None, "onaylayinca tus takimi kapanmali"
+
+    # sinir disi deger reddedilir (popup acik kalir), geri tusu ve iptal
+    w.value_tap.dispatch("on_release")
+    pad = top_popup("Ağırlık (kg)")
+    for k in ("9", "9", "9"):
+        pad.number_pad_press(k)
+    click(find_text(pad, "TAMAM"))
+    assert top_popup("Ağırlık (kg)") is not None and w.value == 46.25, "500'un ustu reddedilmeli"
+    pad.number_pad_press("back"); pad.number_pad_press("back")
+    assert find_text(pad, "9") is not None
+    click(find_text(pad, "İPTAL"))
+    assert top_popup("Ağırlık (kg)") is None and w.value == 46.25, "iptal degeri degistirmemeli"
+
+    # elle girilen deger seti gercekten bu agirlikla ekler
+    w.value_tap.dispatch("on_release")
+    pad = top_popup("Ağırlık (kg)")
+    for k in ("5", "2", ".", "5"):
+        pad.number_pad_press(k)
+    click(find_text(pad, "TAMAM"))
+    rep = [x for x in program_screen.walk() if hasattr(x, "value") and not hasattr(x, "value_tap") and hasattr(x, "set_value")][0]
+    rep.value = 8
+    click(find_all_text(program_screen, "+ SETİ EKLE")[0])
+    sets = app.state["activeSession"]["exercises"][0]["sets"]
+    assert sets and sets[-1]["weight"] == 52.5 and sets[-1]["reps"] == 8, sets
+    program_screen.stop_rest(refresh=False)
+    app.state["activeSession"] = None
+    app.state["incrementSteps"] = {}
+
+safe("set form: weight +/- is always 0.5 and tapping the value opens the number pad",
+     step_weight_stepper_is_always_half_kg_and_accepts_manual_entry)
 
 
 print()

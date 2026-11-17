@@ -49,6 +49,7 @@ LabelBase.register(name="SpaceMono", fn_regular=_f("SpaceMono-Regular.ttf"), fn_
 
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.label import Label
 from kivy.uix.button import Button
@@ -415,8 +416,85 @@ def sp_(v):
     return sp(v) * font_scale()
 
 
+def open_number_pad(title, initial, on_ok, decimals=True, min_val=0, max_val=None):
+    """Uygulama ici sayi tus takimi (sistem klavyesi ACILMAZ - bkz. make_stepper
+    "sifir klavye" notu). Ilk tus mevcut degerin yerine gecer; en fazla 2 ondalik.
+    Gecerli deger girilirse on_ok(float) cagrilir; aralik disiysa uyari verip acik kalir."""
+    app = App.get_running_app()
+    text = [("" if initial is None else (f"{initial:g}" if decimals else str(int(round(initial)))))]
+    fresh = [True]
+    content = BoxLayout(orientation="vertical", spacing=dp(8), padding=dp(10), size_hint_y=None)
+    content.bind(minimum_height=content.setter("height"))
+    display = mono_label("", size=28, color=TEXT, halign="center", bold=True, height=dp(56))
+    bg_rect(display, BG, radius=dp(8))
+    content.add_widget(display)
+
+    def show():
+        display.text = text[0] or "—"
+
+    def press(key):
+        t = text[0]
+        if key == "back":
+            text[0] = "" if fresh[0] else t[:-1]
+            fresh[0] = False
+        elif key == ".":
+            if not decimals:
+                return
+            if fresh[0]:
+                text[0] = "0."
+            elif "." not in t:
+                text[0] = (t or "0") + "."
+            fresh[0] = False
+        else:
+            if fresh[0]:
+                t = ""
+                fresh[0] = False
+            if len(t.replace(".", "")) >= 6:
+                return
+            if "." in t and len(t.split(".")[1]) >= 2:
+                return
+            text[0] = "" if (t == "0" and key == "0") else (key if t == "0" else t + key)
+        show()
+
+    grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None, height=dp(52) * 4 + dp(6) * 3)
+    for key in ("7", "8", "9", "4", "5", "6", "1", "2", "3", ".", "0", "back"):
+        b = styled_button("SİL" if key == "back" else key, color=RAISED, text_color=TEXT, height=dp(52))
+        b.bind(on_release=lambda *_a, k=key: press(k))
+        grid.add_widget(b)
+    content.add_widget(grid)
+
+    btn_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+    cancel = styled_button("İptal", color=RAISED, text_color=TEXT, height=dp(48))
+    ok = styled_button("Tamam", color=ACCENT, text_color=ACCENT_TEXT, height=dp(48))
+    btn_row.add_widget(cancel)
+    btn_row.add_widget(ok)
+    content.add_widget(btn_row)
+    popup = Popup(title=title, content=content, size_hint=(0.88, None))
+    fit_popup_to_content(popup, content)
+
+    def do_ok(*_):
+        t = text[0].rstrip(".")
+        if not t:
+            toast(app, "Bir değer gir")
+            return
+        v = float(t)
+        if (min_val is not None and v < min_val) or (max_val is not None and v > max_val):
+            toast(app, f"Değer {min_val:g} ile {max_val:g} arasında olmalı" if max_val is not None
+                  else f"Değer en az {min_val:g} olmalı")
+            return
+        popup.dismiss(animation=False)
+        on_ok(v)
+
+    cancel.bind(on_release=lambda *_: popup.dismiss(animation=False))
+    ok.bind(on_release=do_ok)
+    show()
+    popup.open(animation=False)
+    popup.number_pad_press = press      # testler icin: tus basimini dogrudan simule eder
+    return popup
+
+
 def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
-                  btn_width=None, row_height=None):
+                  btn_width=None, row_height=None, manual=False):
     """Uygulamadaki HER sayisal deger girisi icin ortak, klavye ACMAYAN
     bileşen. Android'de bazi cihazlarda (dogrulandi: Samsung + Gboard)
     herhangi bir TextInput'a dokunulup klavye acilinca uygulama tamamen
@@ -428,6 +506,9 @@ def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
     tekrar, agirlik, RIR, dinlenme...) bu +/- sayaciyla giriliyor - kisa
     dokunus bir adim, basili tutmak (0.4sn sonra) hizla tekrar eden
     adimlarla degeri degistiriyor.
+
+    manual=True: degerin ustune dokununca uygulama ici sayi tus takimi acilir
+    (sistem klavyesi degil) - buyuk atlamalarda +/- yerine dogrudan deger girilir.
 
     Donen widget'in ".value" ozelligi her zaman guncel (float ya da None)
     degeri tutar.
@@ -508,7 +589,23 @@ def make_stepper(hint, val, step=1, decimals=False, min_val=0, max_val=None,
 
     refresh()
     row.add_widget(minus)
-    row.add_widget(val_lbl)
+    if manual:
+        # Deger alani "girdi kutusu" gibi (koyu zemin) gorunur ve dokunulabilir.
+        tap = ClickableRow()
+        bg_rect(tap, BG, radius=dp(8))
+        tap.add_widget(val_lbl)
+
+        def open_pad(*_):
+            def got(v):
+                box.value = float(v)
+                refresh()
+            open_number_pad(hint, box.value, got, decimals=decimals, min_val=min_val, max_val=max_val)
+
+        tap.bind(on_release=open_pad)
+        box.value_tap = tap
+        row.add_widget(tap)
+    else:
+        row.add_widget(val_lbl)
     row.add_widget(plus)
     box.add_widget(row)
 

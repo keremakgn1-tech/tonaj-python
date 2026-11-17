@@ -90,15 +90,10 @@ def _kg_step_text(kg):
 
 
 def _form_weight_step(state, name):
-    """Set formundaki agirlik +/- adimi: hareketin artis adimi (hareket icin
-    ozel adim ya da genel varsayilan), gosterim biriminde. Vucut agirligi
-    hareketlerinde (adim 0) eski varsayilan: 2.5 kg / 5 lb."""
-    fallback = 2.5 if weight_unit() == "kg" else 5
-    inc = core.increment_for(name, state)
-    if not inc or inc <= 0:
-        return fallback
-    v = round_display_weight(to_display_weight(inc))
-    return v if v and v > 0 else fallback
+    """Set formundaki agirlik +/- adimi: HER hareket icin sabit 0.5 kg (lb modunda
+    1 lb). Hareketin 'artis adimi' sadece ONERI icindir; hizli buyuk atlamalar icin
+    degerin ustune dokunup dogrudan yazilir (sayi tus takimi)."""
+    return 0.5 if weight_unit() == "kg" else 1
 
 
 def suggest_text(ex):
@@ -1076,7 +1071,8 @@ class ProgramScreen(Screen):
             content.bind(minimum_height=content.setter("height"))
             w_max = 500 if weight_unit() == "kg" else 1100
             ew = make_stepper(f"Ağırlık ({weight_unit()})", w0,
-                              step=_form_weight_step(state, ex["name"]), decimals=True, max_val=w_max)
+                              step=_form_weight_step(state, ex["name"]), decimals=True, max_val=w_max,
+                              manual=True)
             er = make_stepper("Tekrar", r0, step=1)
             for wdg in (ew, er):
                 content.add_widget(wdg)
@@ -1203,7 +1199,7 @@ class ProgramScreen(Screen):
             # üzerinde bir tavan.
             w_max = 500 if weight_unit() == "kg" else 1100
             w_stepper = make_stepper(f"Ağırlık ({weight_unit()})", _w0,
-                                      step=w_step, decimals=True, max_val=w_max)
+                                      step=w_step, decimals=True, max_val=w_max, manual=True)
             r_stepper = make_stepper("Tekrar", _r0, step=1)
             form.add_widget(w_stepper)
             form.add_widget(r_stepper)
